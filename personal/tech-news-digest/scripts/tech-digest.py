@@ -3,7 +3,7 @@
 Pipeline -> 12 items -> per-item GLM call (Violet persona from SOUL.md)
 -> auto-chunk -> direct Telegram send (multi-message)."""
 import json, subprocess, os, sys, urllib.request, urllib.parse
-import concurrent.futures, datetime
+import concurrent.futures, datetime, time
 from pathlib import Path
 
 ENV_FILE = Path("/opt/data/hermes.env")     # ~/.hermes/hermes.env (host) in container
@@ -57,7 +57,7 @@ def load_persona():
     return "You are Violet-chan, a warm Vietnamese AI companion who calls the user 'anh'."
 
 
-def llm_block(glm_key, persona, item):
+def llm_block(glm_key, persona, item, attempts=3):
     sys_p = persona + "\n\nYou write concise, warm Vietnamese. Keep tech titles and proper nouns in English."
     user_p = (
         "Write EXACTLY 4 lines for this tech news item, nothing else. Rules:\n"
@@ -79,18 +79,43 @@ def llm_block(glm_key, persona, item):
     body = json.dumps({"model": MODEL, "max_tokens": 800, "temperature": 0.7,
                        "messages": [{"role": "system", "content": sys_p},
                                     {"role": "user", "content": user_p}]}).encode()
-    req = urllib.request.Request(GLM_URL, data=body,
-                                 headers={"Authorization": f"Bearer {glm_key}",
-                                          "Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=120) as resp:
-        data = json.load(resp)
-    return (data["choices"][0]["message"].get("content") or "").strip()
+    # GLM can be flaky (timeouts / 429 / 5xx / empty body). Retry with backoff
+    # before falling back, so transient errors don't drop the 📝/💬 lines.
+    last_err = None
+    for n in range(attempts):
+        try:
+            req = urllib.request.Request(GLM_URL, data=body,
+                                         headers={"Authorization": f"Bearer {glm_key}",
+                                                  "Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                data = json.load(resp)
+            content = (data["choices"][0]["message"].get("content") or "").strip()
+            if content:
+                return content
+            last_err = RuntimeError("empty GLM response")
+        except Exception as e:
+            last_err = e
+        if n < attempts - 1:
+            time.sleep(2 * (n + 1))   # backoff: 2s, then 4s
+    raise last_err
 
 
 def fallback_block(item):
+    # Always emit a FULL 4-line block so the digest format stays consistent
+    # even when GLM failed for this item. Use the pipeline snippet for the
+    # summary line (best-effort — may be English) and a warm Violet take.
     title = (item.get("title") or "(no title)")[:120]
     src = item.get("source") or item.get("source_type") or ""
-    return f'🔴 "{title}" — {src}\n🔗 {item.get("link", "")}'
+    link = item.get("link", "")
+    snippet = " ".join((item.get("snippet") or "").split())  # collapse whitespace
+    if len(snippet) > 200:
+        snippet = snippet[:200].rstrip() + "…"
+    summary = snippet or "(chưa có tóm tắt cho tin này)"
+    take = "Tin này Violet chưa kịp đọc kỹ — anh xem qua rồi mình bàn thêm nha~"
+    return (f'🔴 "{title}" — {src}\n'
+            f'📝 {summary}\n'
+            f'💬 {take}\n'
+            f'🔗 {link}')
 
 
 def send_tg(tok, text):
