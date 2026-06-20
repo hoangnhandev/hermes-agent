@@ -18,6 +18,11 @@ TOPICS = [("llm", "🧠 LLM / Large Models"), ("ai-agent", "🤖 AI Agent"),
           ("crypto", "🪙 Crypto"), ("frontier-tech", "🚀 Frontier Tech")]
 PER_TOPIC = 3   # 3 x 4 topics = 12 items
 MAX_MSG = 3800  # Telegram cap 4096, leave margin
+# Cross-run dedup: remember links already sent so the same GitHub-trending / RSS
+# article (which stays in the pipeline's 48h window and re-scores high) doesn't
+# reappear in every digest of the day. TTL matches the pipeline window.
+SENT_CACHE = Path("/opt/data/scripts/tech-digest-sent.json")
+SENT_TTL_S = 48 * 3600
 
 
 def load_secrets():
@@ -45,14 +50,49 @@ def run_pipeline():
     return Path(MERGED).exists()
 
 
-def select_items(d):
+def select_items(d, sent=None, now_ts=0.0):
+    """Pick top PER_TOPIC articles per topic, skipping links already sent recently.
+    sent = {link: sent_epoch}. If filtering leaves too few fresh items in a topic,
+    fall back to the full pool so the topic (and the digest) is never empty."""
+    sent = sent or {}
     items = []
     for key, _label in TOPICS:
         topic = d.get("topics", {}).get(key, {})
         arts = topic.get("articles", []) if isinstance(topic, dict) else []
-        for a in sorted(arts, key=lambda a: a.get("quality_score", 0), reverse=True)[:PER_TOPIC]:
+        fresh = [a for a in arts if not _recently_sent(a.get("link", ""), sent, now_ts)]
+        pool = fresh if len(fresh) >= PER_TOPIC else arts
+        for a in sorted(pool, key=lambda a: a.get("quality_score", 0), reverse=True)[:PER_TOPIC]:
             items.append(a)
     return items
+
+
+def _recently_sent(link, sent, now_ts):
+    if not link:
+        return False
+    ts = sent.get(link)
+    return bool(ts and now_ts and (now_ts - ts) < SENT_TTL_S)
+
+
+def load_sent():
+    if not SENT_CACHE.exists():
+        return {}
+    try:
+        return {k: float(v) for k, v in json.load(open(SENT_CACHE)).items()}
+    except Exception:
+        return {}
+
+
+def save_sent(links, sent, now_ts):
+    # record new links + prune entries older than 2×TTL to bound the cache size
+    cutoff = now_ts - SENT_TTL_S * 2
+    kept = {k: v for k, v in sent.items() if v > cutoff}
+    for l in links:
+        if l:
+            kept[l] = now_ts
+    try:
+        SENT_CACHE.write_text(json.dumps(kept))
+    except Exception as e:
+        print(f"sent-cache write error: {e}", file=sys.stderr)
 
 
 def load_persona():
@@ -156,7 +196,9 @@ def main():
         print("ERR: pipeline failed", file=sys.stderr)
         sys.exit(0)
     d = json.load(open(MERGED))
-    items = select_items(d)
+    now_ts = time.time()
+    sent_cache = load_sent()
+    items = select_items(d, sent_cache, now_ts)
     if not items:
         sys.exit(0)
     persona = load_persona()
@@ -172,7 +214,10 @@ def main():
                 blocks[i] = f.result()
             except Exception:
                 blocks[i] = fallback_block(items[i])
-    blocks = [b for b in blocks if b]
+    # pair each surviving block with its source link for the sent-cache
+    chosen = [(blocks[i], items[i].get("link", "")) for i in range(len(items)) if blocks[i]]
+    blocks = [b for b, _ in chosen]
+    chosen_links = [ln for _, ln in chosen]
 
     sent = 0
     for msg in build_msgs(header, blocks):
@@ -181,6 +226,9 @@ def main():
                 sent += 1
         except Exception as e:
             print(f"tg send error: {e}", file=sys.stderr)
+    # only remember links we actually delivered (at least one TG message went out)
+    if sent > 0:
+        save_sent(chosen_links, sent_cache, now_ts)
     print(f"digest: {len(blocks)} items -> {sent} messages sent")
 
 
