@@ -33,8 +33,15 @@ def load_secrets():
 
 
 def run_pipeline():
-    r = subprocess.run(["python3", str(SKILL / "scripts/run-pipeline.py"), "--output", MERGED],
-                       capture_output=True, text=True, timeout=150)
+    # Twitter backend is flaky (always 0 items) yet burns ~105s on its own timeout —
+    # that alone ate the entire 120s cron budget and caused the job to be killed.
+    # Skip it, and cap each source step so no single source can stall past the budget.
+    # subprocess timeout (80s) sits well under the 120s cron hard limit.
+    r = subprocess.run(["python3", str(SKILL / "scripts/run-pipeline.py"),
+                        "--output", MERGED,
+                        "--skip", "twitter",
+                        "--step-timeout", "45"],
+                       capture_output=True, text=True, timeout=80)
     return Path(MERGED).exists()
 
 
@@ -57,7 +64,7 @@ def load_persona():
     return "You are Violet-chan, a warm Vietnamese AI companion who calls the user 'anh'."
 
 
-def llm_block(glm_key, persona, item, attempts=3):
+def llm_block(glm_key, persona, item, attempts=2):
     sys_p = persona + "\n\nYou write concise, warm Vietnamese. Keep tech titles and proper nouns in English."
     user_p = (
         "Write EXACTLY 4 lines for this tech news item, nothing else. Rules:\n"
@@ -87,7 +94,7 @@ def llm_block(glm_key, persona, item, attempts=3):
             req = urllib.request.Request(GLM_URL, data=body,
                                          headers={"Authorization": f"Bearer {glm_key}",
                                                   "Content-Type": "application/json"})
-            with urllib.request.urlopen(req, timeout=120) as resp:
+            with urllib.request.urlopen(req, timeout=30) as resp:
                 data = json.load(resp)
             content = (data["choices"][0]["message"].get("content") or "").strip()
             if content:
@@ -121,7 +128,7 @@ def fallback_block(item):
 def send_tg(tok, text):
     body = urllib.parse.urlencode({"chat_id": CHAT_ID, "text": text}).encode()
     req = urllib.request.Request(TG_API.format(tok=tok), data=body)
-    with urllib.request.urlopen(req, timeout=120) as resp:
+    with urllib.request.urlopen(req, timeout=30) as resp:
         return json.load(resp).get("ok") is True
 
 
