@@ -141,4 +141,5 @@ apps/desktop/demo/
 # Local agent tooling & workflow artifacts (Claude Code session state, plans,
 # reports). Personal scratch, not artifacts of the codebase.
 .claude/
+.serena/
 plans/
