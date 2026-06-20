@@ -150,20 +150,24 @@ def llm_block(glm_key, persona, item, attempts=2):
 def fallback_block(item):
     # Always emit a FULL 4-line block so the digest format stays consistent
     # even when GLM failed for this item. Use the pipeline snippet for the
-    # summary line (best-effort — may be English) and a warm Violet take.
+    # summary line (best-effort — may be English). When there's no snippet
+    # (common for RSS items that the pipeline didn't enrich), fall back to a
+    # warm honest line instead of the unhelpful "(chưa có tóm tắt)" placeholder.
     title = (item.get("title") or "(no title)")[:120]
     src = item.get("source") or item.get("source_type") or ""
     link = item.get("link", "")
     snippet = " ".join((item.get("snippet") or "").split())  # collapse whitespace
     if len(snippet) > 200:
         snippet = snippet[:200].rstrip() + "…"
-    summary = snippet or "(chưa có tóm tắt cho tin này)"
+    if snippet:
+        summary = snippet
+    else:
+        summary = f"Violet chưa nắm đủ nội dung tin này, chỉ thấy tiêu đề \"{title}\" — anh mở link xem chi tiết nha."
     take = "Tin này Violet chưa kịp đọc kỹ — anh xem qua rồi mình bàn thêm nha~"
     return (f'🔴 "{title}" — {src}\n'
             f'📝 {summary}\n'
             f'💬 {take}\n'
             f'🔗 {link}')
-
 
 def send_tg(tok, text):
     body = urllib.parse.urlencode({"chat_id": CHAT_ID, "text": text}).encode()
@@ -187,6 +191,7 @@ def build_msgs(header, blocks):
 
 
 def main():
+    t_start = time.monotonic()
     sec = load_secrets()
     glm, tok = sec.get("GLM_API_KEY"), sec.get("TELEGRAM_BOT_TOKEN")
     if not glm or not tok:
@@ -205,14 +210,33 @@ def main():
     today = datetime.date.today().isoformat()
     header = f"📰 Tech News Digest — {today}\n💜 Violet chọn cho anh {len(items)} tin đáng đọc nhất nè~"
 
+    # GLM budget = whatever is left of the 120s cron window after the pipeline,
+    # reserving ~15s for Telegram send + slack. GLM latency is bursty (2-30s/call)
+    # and the endpoint 429s at 3+ concurrent calls, so we run 2 workers under a
+    # hard deadline: complete as many real summaries as fit, fall back for the
+    # rest. This guarantees we ALWAYS finish under 120s and deliver a digest.
+    glm_budget = max(20, 105 - int(time.monotonic() - t_start))
+    n_fallback = 0
     blocks = [None] * len(items)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as ex:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
         fut_idx = {ex.submit(llm_block, glm, persona, it): i for i, it in enumerate(items)}
-        for f in concurrent.futures.as_completed(fut_idx):
-            i = fut_idx[f]
-            try:
-                blocks[i] = f.result()
-            except Exception:
+        try:
+            for f in concurrent.futures.as_completed(fut_idx, timeout=glm_budget):
+                i = fut_idx[f]
+                try:
+                    blocks[i] = f.result()
+                except Exception as e:
+                    n_fallback += 1
+                    print(f"glm fallback [{i}]: {type(e).__name__}: {str(e)[:120]}", file=sys.stderr)
+                    blocks[i] = fallback_block(items[i])
+        except concurrent.futures.TimeoutError:
+            print(f"glm deadline hit after {glm_budget}s; falling back remaining items", file=sys.stderr)
+        # cancel not-yet-started futures; fall back any item not completed in time
+        for f in fut_idx:
+            f.cancel()
+        for i in range(len(items)):
+            if blocks[i] is None:
+                n_fallback += 1
                 blocks[i] = fallback_block(items[i])
     # pair each surviving block with its source link for the sent-cache
     chosen = [(blocks[i], items[i].get("link", "")) for i in range(len(items)) if blocks[i]]
@@ -229,7 +253,7 @@ def main():
     # only remember links we actually delivered (at least one TG message went out)
     if sent > 0:
         save_sent(chosen_links, sent_cache, now_ts)
-    print(f"digest: {len(blocks)} items -> {sent} messages sent")
+    print(f"digest: {len(blocks)} items -> {sent} messages sent (glm fallbacks: {n_fallback})")
 
 
 if __name__ == "__main__":
