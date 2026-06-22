@@ -29,3 +29,12 @@ model:
   default: zai/glm-5.2
   provider: zai
   base_url: https://api.z.ai/api/coding/paas/v4
+
+# 4. Cron no_agent script timeout — raise Hermes' 120s default ceiling.
+#    tech-digest.py self-limits to ~110s, but a flaky-network Telegram send tail
+#    (pipeline timeout + GLM bursty latency + TG ReadError stalls) can push the
+#    total past 120s and get the job killed. A 600s (10m) headroom absorbs that
+#    variance without any script change. Merges into the existing cron: block.
+#    Re-read fresh every run — no container restart needed.
+cron:
+  script_timeout_seconds: 600
