@@ -253,7 +253,13 @@ def main():
     # only remember links we actually delivered (at least one TG message went out)
     if sent > 0:
         save_sent(chosen_links, sent_cache, now_ts)
-    print(f"digest: {len(blocks)} items -> {sent} messages sent (glm fallbacks: {n_fallback})")
+    # Summary to STDERR, not stdout. Hermes' no_agent path delivers any non-empty
+    # stdout as an extra "Cronjob Response" Telegram message (cron/scheduler.py);
+    # since this script already sends the digest itself via send_tg, a stdout
+    # summary would arrive as a redundant follow-up message. Empty stdout =
+    # silent run (no extra delivery). stderr is still captured on failure.
+    print(f"digest: {len(blocks)} items -> {sent} messages sent (glm fallbacks: {n_fallback})",
+          file=sys.stderr)
 
 
 if __name__ == "__main__":
