@@ -58,7 +58,14 @@ def select_items(d, sent=None, now_ts=0.0):
     items = []
     for key, _label in TOPICS:
         topic = d.get("topics", {}).get(key, {})
-        arts = topic.get("articles", []) if isinstance(topic, dict) else []
+        raw = topic.get("articles", []) if isinstance(topic, dict) else []
+        # Drop junk items with no title. They enter the pipeline from web-search
+        # sources (Brave/Tavily append items even when the API returns no title)
+        # and pass through merge/enrich unfiltered. With no title, GLM can't
+        # write a real 🔴 line and instead emits a refusal ("I'm sorry, I cannot
+        # complete this request…"). Filtering here lets a real article fill the
+        # slot instead of wasting it on a "(no title)" item.
+        arts = [a for a in raw if (a.get("title") or "").strip()]
         fresh = [a for a in arts if not _recently_sent(a.get("link", ""), sent, now_ts)]
         pool = fresh if len(fresh) >= PER_TOPIC else arts
         for a in sorted(pool, key=lambda a: a.get("quality_score", 0), reverse=True)[:PER_TOPIC]:
@@ -137,9 +144,16 @@ def llm_block(glm_key, persona, item, attempts=2):
             with urllib.request.urlopen(req, timeout=30) as resp:
                 data = json.load(resp)
             content = (data["choices"][0]["message"].get("content") or "").strip()
-            if content:
+            # A non-empty response isn't enough: when an item has poor/no data,
+            # GLM sometimes returns a polite refusal in prose ("I'm sorry, but I
+            # cannot complete this request…") instead of the 4-line block. That
+            # refusal is non-empty, so without a format check it leaks into the
+            # digest verbatim. Require all 4 markers (🔴/📝/💬/🔗); if any is
+            # missing, treat it as a failed call so fallback_block() emits a
+            # proper, consistent 4-line block instead.
+            if content and all(m in content for m in ("🔴", "📝", "💬", "🔗")):
                 return content
-            last_err = RuntimeError("empty GLM response")
+            last_err = RuntimeError("GLM response missing 4-line format (refusal?)")
         except Exception as e:
             last_err = e
         if n < attempts - 1:
