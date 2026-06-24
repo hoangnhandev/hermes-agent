@@ -38,13 +38,14 @@ def load_secrets():
 
 
 def run_pipeline():
-    # Twitter backend is flaky (always 0 items) yet burns ~105s on its own timeout —
-    # that alone ate the entire 120s cron budget and caused the job to be killed.
-    # Skip it, and cap each source step so no single source can stall past the budget.
-    # subprocess timeout (80s) sits well under the 120s cron hard limit.
+    # Curated sources only: RSS (HackerNews + r/MachineLearning) + GitHub Trending.
+    # --only rss,trending runs just those two steps and skips everything else
+    # (twitter, regular github repo tracking, reddit backend, web/tavily). This
+    # is the intentionally narrow feed the user asked for. step-timeout caps any
+    # single source; subprocess timeout is a hard backstop under the cron ceiling.
     r = subprocess.run(["python3", str(SKILL / "scripts/run-pipeline.py"),
                         "--output", MERGED,
-                        "--skip", "twitter",
+                        "--only", "rss,trending",
                         "--step-timeout", "45"],
                        capture_output=True, text=True, timeout=80)
     return Path(MERGED).exists()
