@@ -91,6 +91,61 @@ hermes cron add "0 3 * * *" \
 | `prices_client.py` | Fetch live prices | 01 |
 | `resolution_client.py` | Check resolved markets | 01 |
 | `predict.py` | LLM prediction + alert | 02 |
+| `_dashboard_data.py` | Dashboard read-only metrics | Dashboard |
+| `_dashboard_render.py` | Metrics → HTML render engine | Dashboard |
+| `generate_dashboard.py` | Dashboard HTML generator (atomic write) | Dashboard |
+| `publish_dashboard.py` | Generate + deploy to Cloudflare Pages | Dashboard |
+
+## Dashboard
+
+Static HTML dashboard visualizing calibration, Brier scores, edge distribution,
+and resolution health. Published to **Cloudflare Pages** behind **Cloudflare Access**.
+
+### Manual Generate
+
+```bash
+python3 scripts/generate_dashboard.py
+# Output: dashboard/dist/index.html (open in browser)
+```
+
+### Manual Publish
+
+```bash
+# Requires: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID in env
+python3 scripts/publish_dashboard.py
+# Dry-run (validate without publishing):
+python3 scripts/publish_dashboard.py --dry-run
+```
+
+### Cron Setup (after scan)
+
+```bash
+hermes cron add "5 0,12 * * *" \
+  --name "Polymarket Dashboard Publish" \
+  --no-agent \
+  --skill polymarket-signals \
+  --script "python3 scripts/publish_dashboard.py" \
+  --workdir "$HERMES_HOME/skills/research/polymarket-signals"
+```
+
+**`--no-agent` is mandatory** — the script reads prediction data and deploy tokens;
+no LLM should ingest that context.
+
+### Architecture
+
+```
+scan cron (0 0,12) → predict.py → SQLite
+publish cron (5 0,12, no_agent) → generate_dashboard.py → dist/index.html
+                                        → publish_dashboard.py → Cloudflare Pages
+```
+
+### Monitoring Checklist
+
+- `hermes cron list` → publish job active + `no_agent` flag set
+- Dashboard `last scan ts` advances twice daily (stale = scan or publish broke)
+- Resolution health: disputed count watched
+- Telegram: publish-failure alert = investigate immediately
+- Access gate: incognito visit must require login (never open)
 
 ## Procedure
 
@@ -143,3 +198,7 @@ Market data goes into user/tool messages only. This preserves the cache prefix.
 3. `python3 scripts/predict.py run-scan --dry-run --max-markets 3` — logs 3 predictions
 4. `python3 scripts/store.py stats` — shows prediction counts
 5. Alerts contain `"uncalibrated — paper trade"` (verify in Telegram delivery)
+6. `python3 scripts/generate_dashboard.py` — produces `dashboard/dist/index.html` (opens offline)
+7. `python3 scripts/publish_dashboard.py --dry-run` — validates upload without publishing
+8. Dashboard empty state: no crash, friendly "collecting" banner when <30 resolved
+9. Incognito visit to Cloudflare Pages URL → Access login gate (not dashboard)
