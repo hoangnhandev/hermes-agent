@@ -99,3 +99,40 @@ Auto-execute, key trading, EIP-712 signing, real-money automation, model fine-tu
 \* P03-P05 deferred out of MVP per F-08.
 
 **Key blockers to verify before any code (F-01, F-02):** (1) which Hermes cron execution model the predictor uses; (2) CLOB V2 endpoint shape post 2026-04-28 cutover.
+
+## Post-MVP Checklist
+
+MVP deployed **2026-06-29**. Cron jobs active on `withly-server`.
+
+### Phase 03-05 Re-evaluation Gate
+
+Phases 03-05 deferred per Red Team F-08. Gated on 4-6 weeks of resolved prediction history.
+
+| Checkpoint | Date | Action |
+|---|---|---|
+| Calibration data ready | **~2026-08-01** (4 weeks post-deploy) | Run one-off Brier score per category. Decision: proceed/abort/phases to build. |
+| Phase 03 gate | After Brier shows directional signal | Build crowd aggregates (Manifold/Metaculus). Depends: `MANIFOLD_API_KEY`, `METACULUS_API_KEY`. |
+| Phase 04 gate | After P03 ensemble improves calibration | Specialized data (polling, CoinGecko, on-chain) + calibrated gating. Depends: `COINGECKO_API_KEY`. |
+| Phase 05 gate | After P04 gating reduces noise | Evaluation report + go/no-go for any future automation. |
+
+### Pre-requisites before Phase 03
+
+- [ ] Accumulate ≥100 resolved predictions per category (crypto, politics)
+- [ ] Brier score < 0.25 in at least one category (random baseline = 0.25 for binary)
+- [ ] Calibration curve shows non-degenerate spread (not all binned at 0.5)
+- [ ] API keys configured: `MANIFOLD_API_KEY`, `METACULUS_API_KEY` in `~/.hermes/hermes.env`
+- [ ] Verify cron resolution check has been filling outcomes table consistently (no gaps)
+
+### Monitoring (ongoing)
+
+- Check `hermes cron list` weekly — jobs must stay `active`
+- Check `python3 scripts/store.py stats` weekly — predictions should accumulate
+- After first 2 weeks: spot-check outcome resolution rate — expect 5-15% of markets resolved/week
+- If resolution rate = 0 after 2 weeks: investigate `resolution_client.py` quarantine logic
+
+### Server Notes
+
+- Skill installed at: `~/.hermes/skills/polymarket-signals/` (local, enabled)
+- DB: `~/.hermes/polymarket_signals.db`
+- Cron jobs: `Polymarket Signal Scan` (0 0,12 * * *) + `Polymarket Resolution Check` (0 3 * * *)
+- Deploy: git pull origin main → cp to `~/.hermes/skills/` (skill not symlinked from repo)
