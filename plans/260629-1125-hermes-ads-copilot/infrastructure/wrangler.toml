@@ -12,4 +12,4 @@ directory = "../dashboard"
 [[d1_databases]]
 binding = "DB"
 database_name = "ads_copilot"
-database_id = "PLACEHOLDER"  # set after D1 creation (see deploy step)
+database_id = "72edf6dd-5fb1-4684-a017-8eadc422899c"  # ads_copilot @ Cloudflare
