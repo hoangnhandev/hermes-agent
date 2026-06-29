@@ -45,7 +45,7 @@ async function fetchWithAuth(path) {
 
 async function loadTabContent(tabId) {
     try {
-        const response = await fetch(`${tabId}.html`);
+        const response = await fetch(`tab-${tabId}.html`);
         if (response.ok) {
             const content = await response.text();
             const container = document.getElementById(`${tabId}-content`);

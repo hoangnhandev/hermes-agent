@@ -2,7 +2,14 @@ name = "ads-copilot-api"
 main = "src/index.js"
 compatibility_date = "2024-09-23"
 
+# Serve the Pages dashboard from the same origin as the API.
+# Default not_found_handling = "none" → static files served directly,
+# /api/* (non-asset) falls through to the Worker fetch handler.
+# Relative paths + httpOnly cookie auth work without CORS.
+[assets]
+directory = "../dashboard"
+
 [[d1_databases]]
 binding = "DB"
 database_name = "ads_copilot"
-database_id = "PLACEHOLDER"  # will be set after D1 creation
+database_id = "PLACEHOLDER"  # set after D1 creation (see deploy step)
