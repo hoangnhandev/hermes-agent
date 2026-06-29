@@ -143,7 +143,8 @@ def main(dry_run: bool = False) -> None:
         sys.exit(1)
 
     # Success
-    public_url = os.environ.get("DASHBOARD_PUBLIC_URL", f"https://{project}.pages.dev")
+    public_url = os.environ.get("DASHBOARD_PUBLIC_URL", "https://polymarket.withly.org")
+    _send_telegram(f"✅ Dashboard published\n📊 {public_url}")
     print(f"\nDashboard published at: {public_url}")
 
 

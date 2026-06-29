@@ -74,4 +74,5 @@ def format_scan_summary(n_markets: int, by_cat: dict, alerts: list,
             lines.append(f"\n{alert}")
     else:
         lines.append("\nNo signals this scan.")
+    lines.append(f"\n📊 Dashboard: https://polymarket.withly.org")
     return "\n".join(lines)
