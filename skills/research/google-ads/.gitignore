@@ -1,0 +1,13 @@
+# Runtime data (sample DBs, logs, sync state) — keep dir via .gitkeep
+data/*.json
+data/*.db
+data/*.db-*
+data/*.log
+
+# Real credentials (only commit .env.example templates)
+google-ads.env
+.env
+
+# Python bytecode cache
+**/__pycache__/
+*.pyc
