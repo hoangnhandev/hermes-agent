@@ -68,8 +68,12 @@ async function verifyJWT(token, secret) {
 export async function verifyAuth(request, env) {
   const cookieHeader = request.headers.get('cookie') || '';
   const cookies = cookieHeader.split(';').reduce((acc, cookie) => {
-    const [key, value] = cookie.trim().split('=');
-    acc[key] = value;
+    // Split on the FIRST '=' only: JWT values are base64 and may contain
+    // '=' padding (and '+'/'/'), which split('=') would truncate.
+    const eqIdx = cookie.indexOf('=');
+    if (eqIdx === -1) return acc;
+    const key = cookie.slice(0, eqIdx).trim();
+    acc[key] = cookie.slice(eqIdx + 1).trim();
     return acc;
   }, {});
 
