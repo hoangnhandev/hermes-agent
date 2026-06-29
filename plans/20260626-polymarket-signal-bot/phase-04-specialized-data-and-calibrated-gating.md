@@ -10,7 +10,7 @@
 
 ## Overview
 
-- **Priority**: P2 · **Status**: pending · **Effort**: 6h
+- **Priority**: P2 · **Status**: deferred · **Effort**: 6h
 - Add specialized context sources (politics polling, crypto CoinGecko/on-chain) for the
   LLM, AND turn on **calibrated gating**: alerts only fire when (a) the category has
   enough resolved history, (b) that category is historically calibrated, and (c) realized

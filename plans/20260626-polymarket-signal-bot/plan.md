@@ -1,7 +1,7 @@
 ---
 title: "Polymarket LLM Signal Bot on Hermes Agent"
 description: "Calibration-driven, signal-only Polymarket prediction system as a Hermes skill."
-status: pending
+status: COMPLETE (MVP)
 priority: P2
 effort: ~15h  # <!-- RED-TEAM F-08 --> MVP (phases 00-02) only; was 32h
 deferred_phases: [03, 04, 05]  # <!-- RED-TEAM F-08 --> separate future gated plan
@@ -51,9 +51,9 @@ Design source of truth: `plans/20260626-polymarket-signal-bot-brainstorm.md`.
 
 | # | Phase | Status | Effort | Depends | File |
 |---|---|---|---|---|---|
-| 00 | Setup, scaffold, SQLite store | pending | 5h | — | [phase-00](phase-00-setup-scaffold-store.md) |
-| 01 | Data clients (markets/prices/resolution) | pending | 5h | 00 | [phase-01](phase-01-data-clients.md) |
-| 02 | LLM predictor MVP + cron scan + alert | pending | 7h | 01 | [phase-02](phase-02-llm-predictor-mvp.md) |
+| 00 | Setup, scaffold, SQLite store | COMPLETE | 5h | — | [phase-00](phase-00-setup-scaffold-store.md) |
+| 01 | Data clients (markets/prices/resolution) | COMPLETE | 5h | 00 | [phase-01](phase-01-data-clients.md) |
+| 02 | LLM predictor MVP + cron scan + alert | COMPLETE | 7h | 01 | [phase-02](phase-02-llm-predictor-mvp.md) |
 | 03 | Crowd aggregates (Manifold/Metaculus) | **deferred** <!-- RED-TEAM F-08 --> | 5h | 02 | [phase-03](phase-03-crowd-aggregates.md) |
 | 04 | Specialized data + calibrated gating | **deferred** <!-- RED-TEAM F-08 --> | 6h | 03 | [phase-04](phase-04-specialized-data-and-calibrated-gating.md) |
 | 05 | Evaluation report + go/no-go | **deferred** <!-- RED-TEAM F-08 --> | 4h | 04 | [phase-05](phase-05-evaluation.md) |

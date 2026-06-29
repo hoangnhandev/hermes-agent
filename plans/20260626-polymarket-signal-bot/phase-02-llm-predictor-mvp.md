@@ -9,7 +9,7 @@
 
 ## Overview
 
-- **Priority**: P2 · **Status**: pending · **Effort**: 7h
+- **Priority**: P2 · **Status**: COMPLETE · **Effort**: 7h
 - `predict.py`: gather context per market via `web_search` → LLM → P(event) + confidence
   + rationale (JSON). Wire into the cron scan. Alert Telegram when `|edge| > threshold`,
   flagged **"uncalibrated — paper trade"** since no resolution history yet. Log every prediction.

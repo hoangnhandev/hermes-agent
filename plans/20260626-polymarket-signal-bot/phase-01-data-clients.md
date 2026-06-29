@@ -10,7 +10,7 @@
 
 ## Overview
 
-- **Priority**: P2 · **Status**: pending · **Effort**: 5h
+- **Priority**: P2 · **Status**: COMPLETE · **Effort**: 5h
 - Three stdlib HTTP clients: discover+filter Crypto/Politics markets, fetch live
   price+history, fetch resolved markets+outcomes. All write into the Phase 00 store.
 - Still no LLM. Goal: a cron-runnable scan that logs the market universe to SQLite.

@@ -9,7 +9,7 @@
 
 ## Overview
 
-- **Priority**: P2 · **Status**: pending · **Effort**: 5h
+- **Priority**: P2 · **Status**: COMPLETE · **Effort**: 5h
 - Stand up the new skill directory, the SKILL.md procedure, the SQLite tracking
   store with full schema, config/.env var definitions, and references scaffolding.
 - No data fetching or LLM yet — this phase only creates the skeleton every later phase fills.

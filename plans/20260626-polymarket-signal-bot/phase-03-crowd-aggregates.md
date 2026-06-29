@@ -10,7 +10,7 @@
 
 ## Overview
 
-- **Priority**: P2 · **Status**: pending · **Effort**: 5h
+- **Priority**: P2 · **Status**: deferred · **Effort**: 5h
 - `crowd_client.py`: query Manifold Markets + Metaculus for forecast aggregates on the
   same question, map to a 0..1 P, ensemble with the LLM P. Goal: a better-calibrated
   `predicted_p` and a richer `ensemble_breakdown` per prediction.

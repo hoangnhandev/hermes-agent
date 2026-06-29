@@ -10,7 +10,7 @@
 
 ## Overview
 
-- **Priority**: P2 · **Status**: pending · **Effort**: 4h
+- **Priority**: P2 · **Status**: deferred · **Effort**: 4h
 - `report.py`: generate a calibration + paper-trade evaluation (Brier per category,
   calibration curve, paper-trade PnL, alert precision). Deliver via CLI + optional
   periodic Telegram summary. Conclude with a documented **go/no-go** for any future
