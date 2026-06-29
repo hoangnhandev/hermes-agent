@@ -1,84 +1,109 @@
-            <div class="kpi-grid">
-                <div class="kpi-card">
-                    <h3>Impressions</h3>
-                    <div class="value" id="overview-impressions">--</div>
-                </div>
-                <div class="kpi-card">
-                    <h3>Clicks</h3>
-                    <div class="value" id="overview-clicks">--</div>
-                </div>
-                <div class="kpi-card">
-                    <h3>CTR</h3>
-                    <div class="value" id="overview-ctr">--</div>
-                </div>
-                <div class="kpi-card">
-                    <h3>Avg CPC</h3>
-                    <div class="value" id="overview-cpc">--</div>
-                </div>
-                <div class="kpi-card">
-                    <h3>Conversions</h3>
-                    <div class="value" id="overview-conversions">--</div>
-                </div>
-                <div class="kpi-card">
-                    <h3>CPL</h3>
-                    <div class="value" id="overview-cpl">--</div>
-                </div>
-                <div class="kpi-card">
-                    <h3>Total Spend</h3>
-                    <div class="value" id="overview-spend">--</div>
-                </div>
-                <div class="kpi-card">
-                    <h3>Conv Rate</h3>
-                    <div class="value" id="overview-conv-rate">--</div>
-                </div>
-            </div>
+<div class="kpi-grid">
+    <div class="kpi-card">
+        <div class="kpi-top"><span class="kpi-label">Impressions</span><span class="kpi-icon" data-icon="eye"></span></div>
+        <div class="kpi-value" id="overview-impressions">--</div>
+        <div class="kpi-delta" id="overview-impressions-delta" hidden></div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-top"><span class="kpi-label">Clicks</span><span class="kpi-icon" data-icon="cursor"></span></div>
+        <div class="kpi-value" id="overview-clicks">--</div>
+        <div class="kpi-delta" id="overview-clicks-delta" hidden></div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-top"><span class="kpi-label">CTR</span><span class="kpi-icon" data-icon="percent"></span></div>
+        <div class="kpi-value" id="overview-ctr">--</div>
+        <div class="kpi-delta" id="overview-ctr-delta" hidden></div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-top"><span class="kpi-label">Avg CPC</span><span class="kpi-icon" data-icon="wallet"></span></div>
+        <div class="kpi-value" id="overview-cpc">--</div>
+        <div class="kpi-delta" id="overview-cpc-delta" hidden></div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-top"><span class="kpi-label">Conversions</span><span class="kpi-icon" data-icon="target"></span></div>
+        <div class="kpi-value" id="overview-conversions">--</div>
+        <div class="kpi-delta" id="overview-conversions-delta" hidden></div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-top"><span class="kpi-label">CPL</span><span class="kpi-icon" data-icon="dollar"></span></div>
+        <div class="kpi-value" id="overview-cpl">--</div>
+        <div class="kpi-delta" id="overview-cpl-delta" hidden></div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-top"><span class="kpi-label">Total Spend</span><span class="kpi-icon" data-icon="wallet"></span></div>
+        <div class="kpi-value" id="overview-spend">--</div>
+        <div class="kpi-delta" id="overview-spend-delta" hidden></div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-top"><span class="kpi-label">Conv Rate</span><span class="kpi-icon" data-icon="activity"></span></div>
+        <div class="kpi-value" id="overview-conv-rate">--</div>
+        <div class="kpi-delta" id="overview-conv-rate-delta" hidden></div>
+    </div>
+</div>
 
-            <div class="chart-container">
-                <h3>Performance Trend</h3>
-                <canvas id="performanceTrendChart"></canvas>
-            </div>
+<div class="section-card">
+    <div class="section-card-header">
+        <div>
+            <div class="section-card-title">Performance Trend</div>
+            <div class="section-card-subtitle">Daily metric value by campaign</div>
+        </div>
+    </div>
+    <div style="position: relative; height: 320px;">
+        <canvas id="performanceTrendChart"></canvas>
+    </div>
+</div>
 
-            <div class="chart-container">
-                <h3>Campaign Comparison</h3>
-                <canvas id="campaignComparisonChart"></canvas>
-            </div>
+<div class="section-card">
+    <div class="section-card-header">
+        <div><div class="section-card-title">Campaign Comparison</div></div>
+    </div>
+    <div style="position: relative; height: 300px;">
+        <canvas id="campaignComparisonChart"></canvas>
+    </div>
+</div>
 
-            <div class="chart-container">
-                <h3>Campaign Performance</h3>
-                <table class="data-table" id="campaignTable">
-                    <thead>
-                        <tr>
-                            <th>Campaign</th>
-                            <th>Status</th>
-                            <th>Objective</th>
-                            <th>Impressions</th>
-                            <th>Clicks</th>
-                            <th>CTR</th>
-                            <th>CPC</th>
-                            <th>Conversions</th>
-                            <th>CPL</th>
-                            <th>Pacing</th>
-                        </tr>
-                    </thead>
-                    <tbody id="campaignTableBody">
-                    </tbody>
-                </table>
-            </div>
+<div class="section-card">
+    <div class="section-card-header">
+        <div><div class="section-card-title">Campaign Performance</div></div>
+    </div>
+    <div class="data-table-wrap">
+        <table class="data-table" id="campaignTable">
+            <thead>
+                <tr>
+                    <th class="th-sort" data-sort-key="name" data-sort-type="string">Campaign<span class="sort-ind"></span></th>
+                    <th class="th-sort" data-sort-key="status" data-sort-type="string">Status<span class="sort-ind"></span></th>
+                    <th class="th-sort" data-sort-key="objective" data-sort-type="string">Objective<span class="sort-ind"></span></th>
+                    <th class="th-sort t-num" data-sort-key="impressions" data-sort-type="number">Impressions<span class="sort-ind"></span></th>
+                    <th class="th-sort t-num" data-sort-key="clicks" data-sort-type="number">Clicks<span class="sort-ind"></span></th>
+                    <th class="th-sort t-num" data-sort-key="ctr" data-sort-type="number">CTR<span class="sort-ind"></span></th>
+                    <th class="th-sort t-num" data-sort-key="cpc" data-sort-type="number">CPC<span class="sort-ind"></span></th>
+                    <th class="th-sort t-num" data-sort-key="conversions" data-sort-type="number">Conversions<span class="sort-ind"></span></th>
+                    <th class="th-sort t-num" data-sort-key="cpl" data-sort-type="number">CPL<span class="sort-ind"></span></th>
+                    <th class="th-sort t-num" data-sort-key="pacing" data-sort-type="number">Pacing<span class="sort-ind"></span></th>
+                </tr>
+            </thead>
+            <tbody id="campaignTableBody"></tbody>
+        </table>
+    </div>
+</div>
 
-            <div class="chart-container">
-                <h3>Top Keywords</h3>
-                <table class="data-table" id="topKeywordsTable">
-                    <thead>
-                        <tr>
-                            <th>Keyword</th>
-                            <th>Impressions</th>
-                            <th>Clicks</th>
-                            <th>CTR</th>
-                            <th>CPC</th>
-                            <th>Conversions</th>
-                        </tr>
-                    </thead>
-                    <tbody id="topKeywordsTableBody">
-                    </tbody>
-                </table>
-            </div>
+<div class="section-card">
+    <div class="section-card-header">
+        <div><div class="section-card-title">Top Keywords</div></div>
+    </div>
+    <div class="data-table-wrap">
+        <table class="data-table" id="topKeywordsTable">
+            <thead>
+                <tr>
+                    <th class="th-sort" data-sort-key="text" data-sort-type="string">Keyword<span class="sort-ind"></span></th>
+                    <th class="th-sort t-num" data-sort-key="impressions" data-sort-type="number">Impressions<span class="sort-ind"></span></th>
+                    <th class="th-sort t-num" data-sort-key="clicks" data-sort-type="number">Clicks<span class="sort-ind"></span></th>
+                    <th class="th-sort t-num" data-sort-key="ctr" data-sort-type="number">CTR<span class="sort-ind"></span></th>
+                    <th class="th-sort t-num" data-sort-key="cpc" data-sort-type="number">CPC<span class="sort-ind"></span></th>
+                    <th class="th-sort t-num" data-sort-key="conversions" data-sort-type="number">Conversions<span class="sort-ind"></span></th>
+                </tr>
+            </thead>
+            <tbody id="topKeywordsTableBody"></tbody>
+        </table>
+    </div>
+</div>

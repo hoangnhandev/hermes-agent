@@ -1,28 +1,40 @@
-            <div class="kpi-grid">
-                <div class="kpi-card">
-                    <h3>Leads Today</h3>
-                    <div class="value" id="leads-today">--</div>
-                </div>
-                <div class="kpi-card">
-                    <h3>Leads This Week</h3>
-                    <div class="value" id="leads-week">--</div>
-                </div>
-                <div class="kpi-card">
-                    <h3>Leads All Time</h3>
-                    <div class="value" id="leads-alltime">--</div>
-                </div>
-                <div class="kpi-card">
-                    <h3>Avg Quality Score</h3>
-                    <div class="value" id="leads-quality">--</div>
-                </div>
-            </div>
+<div class="kpi-grid">
+    <div class="kpi-card">
+        <div class="kpi-top"><span class="kpi-label">Leads Today</span><span class="kpi-icon" data-icon="calendar"></span></div>
+        <div class="kpi-value" id="leads-today">--</div>
+        <div class="kpi-delta" id="leads-today-delta" hidden></div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-top"><span class="kpi-label">Leads This Week</span><span class="kpi-icon" data-icon="calendar"></span></div>
+        <div class="kpi-value" id="leads-week">--</div>
+        <div class="kpi-delta" id="leads-week-delta" hidden></div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-top"><span class="kpi-label">Leads All Time</span><span class="kpi-icon" data-icon="clock"></span></div>
+        <div class="kpi-value" id="leads-alltime">--</div>
+        <div class="kpi-delta" id="leads-alltime-delta" hidden></div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-top"><span class="kpi-label">Avg Quality Score</span><span class="kpi-icon" data-icon="target"></span></div>
+        <div class="kpi-value" id="leads-quality">--</div>
+        <div class="kpi-delta" id="leads-quality-delta" hidden></div>
+    </div>
+</div>
 
-            <div class="chart-container">
-                <h3>Lead Trend</h3>
-                <canvas id="leadTrendChart"></canvas>
-            </div>
+<div class="section-card">
+    <div class="section-card-header">
+        <div><div class="section-card-title">Lead Trend</div></div>
+    </div>
+    <div style="position: relative; height: 320px;">
+        <canvas id="leadTrendChart"></canvas>
+    </div>
+</div>
 
-            <div class="chart-container">
-                <h3>Lead Sources</h3>
-                <canvas id="leadSourcesChart"></canvas>
-            </div>
+<div class="section-card">
+    <div class="section-card-header">
+        <div><div class="section-card-title">Lead Sources</div></div>
+    </div>
+    <div style="position: relative; height: 320px;">
+        <canvas id="leadSourcesChart"></canvas>
+    </div>
+</div>

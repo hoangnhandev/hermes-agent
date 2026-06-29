@@ -1,0 +1,119 @@
+/* ============================================================
+   Design tokens — Ads Copilot Dashboard
+   Clean-minimal data dashboard. Dark default + light override.
+   All colors/spacing/typography flow from here; components
+   must never hardcode hex values (WCAG AA verified).
+   ============================================================ */
+
+:root {
+  /* Brand accent (shared across themes) */
+  --accent: #4f8cff;
+  --accent-hover: #68a0ff;
+  --accent-contrast: #ffffff;
+  --accent-soft: rgba(79, 140, 255, 0.14);
+
+  /* Status — functional color, always paired with icon/text */
+  --success: #34d399;
+  --warning: #fbbf24;
+  --danger: #f87171;
+  --info: #38bdf8;
+  --success-soft: rgba(52, 211, 153, 0.14);
+  --warning-soft: rgba(251, 191, 36, 0.16);
+  --danger-soft: rgba(248, 113, 113, 0.14);
+
+  /* Typography — Fira Sans (body) + Fira Code (data/numbers) */
+  --font-sans: 'Fira Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'Fira Code', ui-monospace, 'SF Mono', Menlo, monospace;
+  --fs-xs: 0.75rem;      /* 12 */
+  --fs-sm: 0.8125rem;    /* 13 */
+  --fs-base: 0.9375rem;  /* 15 */
+  --fs-md: 1rem;         /* 16 */
+  --fs-lg: 1.125rem;     /* 18 */
+  --fs-xl: 1.5rem;       /* 24 */
+  --fs-2xl: 2rem;        /* 32 */
+  --lh-tight: 1.25;
+  --lh: 1.5;
+
+  /* Spacing — 4px rhythm */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 48px;
+
+  /* Radius */
+  --r-sm: 6px;
+  --r: 10px;
+  --r-lg: 14px;
+  --r-pill: 999px;
+
+  /* Sidebar geometry */
+  --sidebar-w: 244px;
+  --sidebar-w-collapsed: 68px;
+  --topbar-h: 60px;
+
+  /* Z-index scale */
+  --z-sidebar: 20;
+  --z-topbar: 30;
+  --z-overlay: 40;
+  --z-modal: 50;
+
+  /* Motion — subtle, conveys cause-effect */
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-fast: 120ms;
+  --dur: 200ms;
+  --dur-slow: 320ms;
+
+  /* Chart series palette — vivid, readable on both themes */
+  --chart-1: #4f8cff;
+  --chart-2: #34d399;
+  --chart-3: #fbbf24;
+  --chart-4: #38bdf8;
+  --chart-5: #f87171;
+  --chart-6: #a78bfa;
+  --chart-7: #f472b6;
+}
+
+/* ---------- Dark theme (default) ---------- */
+:root,
+[data-theme='dark'] {
+  --bg-base: #0b0f1a;
+  --bg-surface: #131a2a;
+  --bg-elevated: #1b2336;
+  --bg-hover: #222c44;
+  --bg-input: #0f1524;
+  --border: #232c44;
+  --border-strong: #2e3a57;
+  --text-primary: #e6eaf2;
+  --text-secondary: #9aa4be;
+  --text-muted: #6b7494;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow: 0 8px 24px rgba(0, 0, 0, 0.38);
+  --scrim: rgba(4, 7, 14, 0.62);
+  color-scheme: dark;
+}
+
+/* ---------- Light theme ---------- */
+[data-theme='light'] {
+  --bg-base: #f6f8fc;
+  --bg-surface: #ffffff;
+  --bg-elevated: #f0f3f9;
+  --bg-hover: #e9eef6;
+  --bg-input: #ffffff;
+  --border: #e3e8f0;
+  --border-strong: #d2d9e6;
+  --text-primary: #182033;
+  --text-secondary: #56607a;
+  --text-muted: #8a94ab;
+  --accent-soft: rgba(79, 140, 255, 0.10);
+  --success-soft: rgba(52, 211, 153, 0.12);
+  --warning-soft: rgba(217, 119, 6, 0.12);
+  --danger-soft: rgba(220, 38, 38, 0.10);
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.06);
+  --shadow: 0 8px 24px rgba(16, 24, 40, 0.10);
+  --scrim: rgba(16, 24, 40, 0.45);
+  color-scheme: light;
+}

@@ -1,50 +1,61 @@
-            <div class="chart-container">
-                <h3>Monthly Budget Progress</h3>
-                <div class="progress-bar">
-                    <div class="progress-fill" id="budgetProgress"></div>
-                </div>
-                <p style="margin-top: 0.5rem; font-size: 0.875rem; color: var(--text-secondary);">
-                    <span id="budgetPercent">0%</span> of <span id="totalBudget">$0</span> spent
-                </p>
+<div class="section-card">
+    <div class="section-card-header">
+        <div>
+            <div class="section-card-title">Monthly Budget</div>
+            <div class="section-card-subtitle">
+                <span id="budgetPercent">0%</span> of <span id="totalBudget">0 ₫</span> spent
             </div>
+        </div>
+    </div>
+    <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="budgetProgressWrap">
+        <div class="progress-bar" id="budgetProgress" style="width: 0%;"></div>
+    </div>
+</div>
 
-            <div class="kpi-grid">
-                <div class="kpi-card">
-                    <h3>Daily Average</h3>
-                    <div class="value" id="budget-daily-avg">--</div>
-                </div>
-                <div class="kpi-card">
-                    <h3>Today's Spend</h3>
-                    <div class="value" id="budget-today">--</div>
-                </div>
-                <div class="kpi-card">
-                    <h3>Pacing</h3>
-                    <div class="value" id="budget-pacing">--</div>
-                </div>
-                <div class="kpi-card">
-                    <h3>EOM Forecast</h3>
-                    <div class="value" id="budget-forecast">--</div>
-                </div>
-            </div>
+<div class="kpi-grid">
+    <div class="kpi-card">
+        <div class="kpi-top"><span class="kpi-label">Daily Average</span><span class="kpi-icon" data-icon="wallet"></span></div>
+        <div class="kpi-value" id="budget-daily-avg">--</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-top"><span class="kpi-label">Today's Spend</span><span class="kpi-icon" data-icon="calendar"></span></div>
+        <div class="kpi-value" id="budget-today">--</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-top"><span class="kpi-label">Pacing</span><span class="kpi-icon" data-icon="activity"></span></div>
+        <div class="kpi-value" id="budget-pacing">--</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-top"><span class="kpi-label">EOM Forecast</span><span class="kpi-icon" data-icon="target"></span></div>
+        <div class="kpi-value" id="budget-forecast">--</div>
+    </div>
+</div>
 
-            <div class="chart-container">
-                <h3>Spend Trend</h3>
-                <canvas id="spendTrendChart"></canvas>
-            </div>
+<div class="section-card">
+    <div class="section-card-header">
+        <div><div class="section-card-title">Spend Trend</div></div>
+    </div>
+    <div style="position: relative; height: 320px;">
+        <canvas id="spendTrendChart"></canvas>
+    </div>
+</div>
 
-            <div class="chart-container">
-                <h3>Per-Campaign Pacing</h3>
-                <table class="data-table" id="pacingTable">
-                    <thead>
-                        <tr>
-                            <th>Campaign</th>
-                            <th>Daily Budget</th>
-                            <th>Spent</th>
-                            <th>Pacing %</th>
-                            <th>Status</th>
-                        </tr>
-                    </thead>
-                    <tbody id="pacingTableBody">
-                    </tbody>
-                </table>
-            </div>
+<div class="section-card">
+    <div class="section-card-header">
+        <div><div class="section-card-title">Per-Campaign Pacing</div></div>
+    </div>
+    <div class="data-table-wrap">
+        <table class="data-table" id="pacingTable">
+            <thead>
+                <tr>
+                    <th class="th-sort" data-sort-key="name" data-sort-type="string">Campaign<span class="sort-ind"></span></th>
+                    <th class="th-sort t-num" data-sort-key="daily_budget" data-sort-type="number">Daily Budget<span class="sort-ind"></span></th>
+                    <th class="th-sort t-num" data-sort-key="spent" data-sort-type="number">Spent<span class="sort-ind"></span></th>
+                    <th class="th-sort t-num" data-sort-key="pacing_percent" data-sort-type="number">Pacing %<span class="sort-ind"></span></th>
+                    <th class="th-sort" data-sort-key="status" data-sort-type="string">Status<span class="sort-ind"></span></th>
+                </tr>
+            </thead>
+            <tbody id="pacingTableBody"></tbody>
+        </table>
+    </div>
+</div>

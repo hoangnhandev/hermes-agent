@@ -1,27 +1,40 @@
-            <div class="chart-container">
-                <h3>Best Performing Ad Copy</h3>
-                <div id="bestAdCopy"></div>
-            </div>
+<div class="section-card">
+    <div class="section-card-header">
+        <div>
+            <div class="section-card-title">Best Performing Ad Copy</div>
+            <div class="section-card-subtitle">Top headlines by CTR and conversions</div>
+        </div>
+    </div>
+    <div id="bestAdCopy"></div>
+</div>
 
-            <div class="chart-container">
-                <h3>Keyword Performance</h3>
-                <table class="data-table" id="keywordPerformanceTable">
-                    <thead>
-                        <tr>
-                            <th>Keyword</th>
-                            <th>Impressions</th>
-                            <th>Clicks</th>
-                            <th>CTR</th>
-                            <th>CPC</th>
-                            <th>Conversions</th>
-                        </tr>
-                    </thead>
-                    <tbody id="keywordPerformanceTableBody">
-                    </tbody>
-                </table>
-            </div>
+<div class="section-card">
+    <div class="section-card-header">
+        <div><div class="section-card-title">Keyword Performance</div></div>
+    </div>
+    <div class="data-table-wrap">
+        <table class="data-table" id="keywordPerformanceTable">
+            <thead>
+                <tr>
+                    <th class="th-sort" data-sort-key="text" data-sort-type="string">Keyword<span class="sort-ind"></span></th>
+                    <th class="th-sort t-num" data-sort-key="impressions" data-sort-type="number">Impressions<span class="sort-ind"></span></th>
+                    <th class="th-sort t-num" data-sort-key="clicks" data-sort-type="number">Clicks<span class="sort-ind"></span></th>
+                    <th class="th-sort t-num" data-sort-key="ctr" data-sort-type="number">CTR<span class="sort-ind"></span></th>
+                    <th class="th-sort t-num" data-sort-key="cpc" data-sort-type="number">CPC<span class="sort-ind"></span></th>
+                    <th class="th-sort t-num" data-sort-key="conversions" data-sort-type="number">Conversions<span class="sort-ind"></span></th>
+                </tr>
+            </thead>
+            <tbody id="keywordPerformanceTableBody"></tbody>
+        </table>
+    </div>
+</div>
 
-            <div class="chart-container">
-                <h3>Optimization Suggestions</h3>
-                <div id="optimizationSuggestions"></div>
-            </div>
+<div class="section-card">
+    <div class="section-card-header">
+        <div>
+            <div class="section-card-title">Optimization Suggestions</div>
+            <div class="section-card-subtitle">AI-generated recommendations ranked by impact</div>
+        </div>
+    </div>
+    <div id="optimizationSuggestions"></div>
+</div>

@@ -1,26 +1,47 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login - Ads Copilot</title>
-    <link rel="stylesheet" href="style.css">
+    <title>Sign in — Ads Copilot</title>
+    <meta name="color-scheme" content="dark light">
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Fira+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="tokens.css">
+    <link rel="stylesheet" href="base.css">
+    <link rel="stylesheet" href="components.css">
     <link rel="stylesheet" href="login.css">
 </head>
 <body>
-    <div class="login-container">
+    <div class="login-shell">
         <div class="login-card">
-            <h2>Ads Copilot</h2>
-            <form id="loginForm">
-                <div class="form-group">
-                    <label for="password">Password</label>
-                    <input type="password" id="password" name="password" required>
+            <div class="login-brand">
+                <span class="brand-mark" data-icon="dashboard"></span>
+                <span class="login-brand-name">Ads Copilot</span>
+            </div>
+            <p class="login-subtitle">Sign in to your dashboard</p>
+
+            <form id="loginForm" novalidate>
+                <div class="field">
+                    <label class="field-label" for="password">Password</label>
+                    <div class="input-wrap">
+                        <input class="input" type="password" id="password" name="password"
+                               autocomplete="current-password" placeholder="Enter password" required>
+                        <button type="button" class="input-toggle" id="passwordToggle"
+                                aria-label="Show password" aria-pressed="false">
+                            <span data-icon="eye"></span>
+                        </button>
+                    </div>
                 </div>
-                <div id="errorMessage" class="error-message"></div>
-                <button type="submit" class="btn">Login</button>
+                <div class="field-error" id="errorMessage" role="alert" aria-live="polite"></div>
+                <button type="submit" class="btn btn-primary" id="loginBtn">Sign in</button>
             </form>
         </div>
     </div>
+
+    <script src="icons.js"></script>
     <script src="login.js"></script>
 </body>
 </html>

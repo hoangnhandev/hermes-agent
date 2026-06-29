@@ -155,3 +155,17 @@ export async function handleRefresh(request, env) {
     }
   });
 }
+
+// Logout handler — clears the HttpOnly session cookie.
+// Client JS cannot delete an HttpOnly cookie, so the server MUST issue an
+// expired Set-Cookie. Idempotent: succeeds whether or not a cookie exists.
+export async function handleLogout() {
+  return new Response(JSON.stringify({ success: true }), {
+    status: 200,
+    headers: {
+      'Content-Type': 'application/json',
+      // Max-Age=0 + past Expires → browser deletes the cookie immediately.
+      'Set-Cookie': 'jwt_token=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT'
+    }
+  });
+}

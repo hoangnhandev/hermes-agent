@@ -22,6 +22,26 @@ export default {
       return handleRefresh(request, env);
     }
 
+    // Logout: clear the HttpOnly session cookie. Public route (idempotent).
+    if (pathname === '/api/auth/logout' && request.method === 'POST') {
+      const { handleLogout } = await import('./auth.js');
+      return handleLogout(request, env);
+    }
+
+    // Cookie verification for the SPA auth gate.
+    // The dashboard cookie (jwt_token) is HttpOnly, so the browser cannot read
+    // it from JS — the client must ask the server whether it is authenticated.
+    if (pathname === '/api/auth/verify' && request.method === 'GET') {
+      const result = await verifyAuth(request, env);
+      return new Response(
+        JSON.stringify({ authenticated: result.authenticated }),
+        {
+          status: result.authenticated ? 200 : 401,
+          headers: { 'Content-Type': 'application/json' }
+        }
+      );
+    }
+
     // Apply auth middleware to all other routes
     const authResult = await verifyAuth(request, env);
     if (!authResult.authenticated) {

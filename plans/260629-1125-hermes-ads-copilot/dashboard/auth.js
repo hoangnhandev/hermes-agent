@@ -1,34 +1,27 @@
-function getCookie(name) {
-    const cookies = document.cookie.split(';');
-    for (let cookie of cookies) {
-        const [cookieName, cookieValue] = cookie.trim().split('=');
-        if (cookieName === name) {
-            return decodeURIComponent(cookieValue);
-        }
-    }
-    return null;
-}
+// Client-side auth helpers.
+//
+// The dashboard session cookie (jwt_token) is HttpOnly + Secure, so it is NOT
+// readable via document.cookie by design (see infra/src/auth.js). Authentication
+// therefore MUST be verified by asking the server, never by reading the cookie
+// in JS. Reading document.cookie here silently returns null and logs the user
+// out immediately after login.
 
-function checkAuth() {
-    const token = getCookie('auth_token');
-    if (!token) {
-        return false;
-    }
-
+// Ask the server whether the current HttpOnly session cookie is valid.
+async function checkAuth() {
     try {
-        const payload = JSON.parse(atob(token.split('.')[1]));
-        const now = Math.floor(Date.now() / 1000);
-
-        if (payload.exp && payload.exp < now) {
-            return false;
-        }
-
-        return true;
+        const response = await fetch('/api/auth/verify', {
+            method: 'GET',
+            credentials: 'include'
+        });
+        return response.ok;
     } catch (error) {
         return false;
     }
 }
 
+// Attempt a token refresh. Returns true on success (page reloads), false when the
+// session cannot be refreshed (caller redirects to login). The boolean return is
+// required by fetchWithAuth (utils.js) to decide whether to retry the request.
 async function refreshAndRedirect() {
     try {
         const response = await fetch('/api/auth/refresh', {
@@ -38,14 +31,17 @@ async function refreshAndRedirect() {
 
         if (response.ok) {
             window.location.reload();
-        } else {
-            window.location.href = 'index.html';
+            return true;
         }
+
+        window.location.href = 'index.html';
+        return false;
     } catch (error) {
         window.location.href = 'index.html';
+        return false;
     }
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { getCookie, checkAuth, refreshAndRedirect };
+    module.exports = { checkAuth, refreshAndRedirect };
 }

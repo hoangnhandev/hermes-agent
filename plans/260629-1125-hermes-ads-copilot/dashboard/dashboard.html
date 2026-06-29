@@ -1,48 +1,98 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Ads Copilot Dashboard</title>
-    <link rel="stylesheet" href="style.css">
+    <meta name="color-scheme" content="dark light">
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Fira+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="tokens.css">
+    <link rel="stylesheet" href="base.css">
+    <link rel="stylesheet" href="layout.css">
+    <link rel="stylesheet" href="components.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.js"></script>
 </head>
 <body>
-    <div class="container" style="padding: 1rem; max-width: 1400px; margin: 0 auto;">
-        <div class="header">
-            <h1>Ads Copilot</h1>
-            <span class="last-updated" id="lastUpdated">Last updated: --</span>
-        </div>
+    <a href="#mainContent" class="skip-link">Skip to content</a>
 
-        <div class="tab-nav">
-            <button class="tab-btn active" data-tab="overview">Campaign Overview</button>
-            <button class="tab-btn" data-tab="leads">Lead Metrics</button>
-            <button class="tab-btn" data-tab="keywords">Ad Copy & Keywords</button>
-            <button class="tab-btn" data-tab="budget">Budget Tracking</button>
-        </div>
+    <div class="app-shell" id="appShell">
+        <!-- Sidebar -->
+        <aside class="sidebar" aria-label="Primary">
+            <div class="sidebar-head">
+                <a class="brand" href="#" aria-label="Ads Copilot home">
+                    <span class="brand-mark" data-icon="dashboard"></span>
+                    <span class="brand-name">Ads Copilot</span>
+                </a>
+            </div>
 
-        <div id="overview-tab" class="tab-content active">
-            <div id="overview-content"></div>
-        </div>
+            <nav class="nav" aria-label="Sections">
+                <button type="button" class="nav-item active" data-tab="overview">
+                    <span class="nav-icon" data-icon="dashboard"></span>
+                    <span class="nav-label">Campaign Overview</span>
+                </button>
+                <button type="button" class="nav-item" data-tab="leads">
+                    <span class="nav-icon" data-icon="users"></span>
+                    <span class="nav-label">Lead Metrics</span>
+                </button>
+                <button type="button" class="nav-item" data-tab="keywords">
+                    <span class="nav-icon" data-icon="tag"></span>
+                    <span class="nav-label">Ad Copy &amp; Keywords</span>
+                </button>
+                <button type="button" class="nav-item" data-tab="budget">
+                    <span class="nav-icon" data-icon="dollar"></span>
+                    <span class="nav-label">Budget Tracking</span>
+                </button>
+            </nav>
 
-        <div id="leads-tab" class="tab-content">
-            <div id="leads-content"></div>
-        </div>
+            <div class="sidebar-foot">
+                <button type="button" class="nav-item" id="themeToggle" aria-label="Toggle theme">
+                    <span class="nav-icon" id="themeToggleIcon"></span>
+                    <span class="foot-label">Theme</span>
+                </button>
+                <button type="button" class="nav-item" id="logoutBtn" aria-label="Log out">
+                    <span class="nav-icon" data-icon="logout"></span>
+                    <span class="foot-label">Log out</span>
+                </button>
+            </div>
+        </aside>
 
-        <div id="keywords-tab" class="tab-content">
-            <div id="keywords-content"></div>
-        </div>
+        <div class="sidebar-overlay" id="sidebarOverlay" tabindex="-1" aria-hidden="true"></div>
 
-        <div id="budget-tab" class="tab-content">
-            <div id="budget-content"></div>
+        <!-- Main -->
+        <div class="main">
+            <header class="topbar">
+                <button type="button" class="icon-btn" id="sidebarToggle" aria-label="Toggle navigation">
+                    <span data-icon="collapse"></span>
+                </button>
+                <h1 class="topbar-title" id="topbarTitle">Campaign Overview</h1>
+                <div class="topbar-actions">
+                    <span class="last-updated" id="lastUpdated">Last updated: --</span>
+                    <button type="button" class="icon-btn" id="refreshBtn" aria-label="Refresh data">
+                        <span data-icon="refresh"></span>
+                    </button>
+                </div>
+            </header>
+
+            <main class="content" id="mainContent">
+                <div id="overview-tab" class="tab-pane active"></div>
+                <div id="leads-tab" class="tab-pane"></div>
+                <div id="keywords-tab" class="tab-pane"></div>
+                <div id="budget-tab" class="tab-pane"></div>
+            </main>
         </div>
     </div>
 
+    <!-- Order matters: icons first (defines icon()), data/render next, shell last -->
+    <script src="icons.js"></script>
     <script src="auth.js"></script>
     <script src="charts.js"></script>
     <script src="chart-tables.js"></script>
     <script src="utils.js"></script>
     <script src="render-functions.js"></script>
     <script src="dashboard.js"></script>
+    <script src="app.js"></script>
 </body>
 </html>
