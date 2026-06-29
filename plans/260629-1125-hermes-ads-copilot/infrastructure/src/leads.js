@@ -80,7 +80,7 @@ export async function handleLeads(request, env) {
     };
 
     // Get trend data (daily lead counts for last 30 days)
-    const trendQuery = `
+    let trendQuery = `
       SELECT
         DATE(conversion_date) as date,
         COUNT(*) as leads,
@@ -108,7 +108,7 @@ export async function handleLeads(request, env) {
     }));
 
     // Get source breakdown
-    const sourceQuery = `
+    let sourceQuery = `
       SELECT
         source,
         COUNT(*) as leads,
