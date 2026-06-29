@@ -1,6 +1,6 @@
 ---
 name: google-ads-research
-description: "Google Ads research skill: keyword, competitor, audience, budget analysis via web search + LLM"
+description: "Google Ads skill for Vinfast (VN): budget-aware strategy generator (deterministic benchmarks) + campaign creator/monitor/optimize. LLM enhancement layered by agent on top of deterministic spine."
 version: 0.1.0
 author: Hermes Agent
 tags: [google-ads, keyword-research, competitor-analysis, hermes-skill]
@@ -23,35 +23,45 @@ Use this skill when you need comprehensive Google Ads research including:
 
 - Hermes Agent with web search capabilities
 - Access to LLM reasoning (provided by Hermes runtime)
-- No Google Ads API key required for research (uses web search + LLM analysis)
+- No Google Ads API key required for research (deterministic benchmarks from `references/`; the agent layers LLM reasoning on the `--json` output)
 - Google Ads API credentials required for campaign creation
 
 ## How to Run
 
-### Research Only
+### Research Only (budget-aware strategy generator)
 ```bash
-# Basic research with default settings
-python3 scripts/research.py --niche "plumbing services"
+# Budget-aware strategy — Vinfast VF3 (default), Vietnam market.
+# Budget in VND. Outputs honest projections (clicks → leads → sales) + tier + keyword seeds.
+python3 scripts/research.py --budget 10000000 --model vf3
 
-# With custom location and budget
-python3 scripts/research.py --niche "dentist" --location "New York" --budget 1000 --goal "appointments"
+# With honest goal check (warns if budget can't hit goal_sales/month)
+python3 scripts/research.py --budget 10000000 --model vf3 --goal-sales 2
+
+# Other models: vf3 vf5 vf6 vf7 vf8 vf9  | JSON output for agent/pipe
+python3 scripts/research.py --budget 5000000 --model vf5 --json
 ```
+**Note:** research.py is the deterministic spine (benchmarks from `references/automotive-benchmarks.md`).
+LLM enhancement (ad-copy angles, keyword expansion) is layered by the agent on top of the JSON output.
+Old `--niche/--location` plumbing-style CLI is removed — this skill is Vinfast-automotive focused.
 
-### Campaign Creation
+### Campaign Creation (requires research plan + Google Ads creds)
 ```bash
-# Create campaign from research plan
-python3 scripts/creator.py --plan data/google-ads-research-2026-06-29.json
+# Create campaign from a research strategy file (output of research.py)
+python3 scripts/creator.py --plan data/strategy-vf3-2026-06-30.json
 
-# Or inline research + creation
-python3 scripts/creator.py --niche "web design agency" --location "Austin, TX" --budget 500
+# Dry-run with mock Google Ads client (no real deploy, no spend)
+python3 scripts/creator.py --plan data/strategy-vf3-2026-06-30.json --mock
 ```
+**Note:** `creator.py` requires `--plan` (inline research not implemented).
+Interactive approval (`input()`) is used — **not cron-safe yet** (Phase 03 async
+`--approve` gate planned). Runs in cron/non-tty will abort cleanly without deploying.
 
 ## Research Capabilities
 
 ### Keyword Research
-- Generates seed keywords based on niche and location
-- Expands keywords via web search
-- Classifies search intent (transactional/informational/navigational)
+- Deterministic keyword seeds (branded/non-branded/intent/competitor/negative) from `references/automotive-keyword-taxonomy.md`
+- Vinfast VF-focused (VF3 default); expandable to vf5/vf6/vf7/vf8/vf9
+- Full taxonomy + Vietnamese variants in references (agent can layer LLM expansion)
 - Estimates competition levels and suggested bids
 - Recommends match types (defaults to phrase for new accounts)
 
@@ -73,6 +83,17 @@ python3 scripts/creator.py --niche "web design agency" --location "Austin, TX" -
 - Provides cost-per-click and cost-per-lead estimates
 - Recommends bidding strategies
 
+### Automotive Domain Knowledge (Vinfast/EV)
+- **Industry Benchmarks:** $2.41 CPC, 7.76% CVR, $38.86 CPL (automotive vs. general $5.26 CPC, 7.52% CVR, $70.11 CPL)
+- **EV Marketing Nuances:** Range/charge anxiety messaging, infrastructure confidence, TCO focus
+- **Vinfast Positioning:** Vietnam #1 EV brand, 10-year warranty, battery lease, national brand pride
+- **Budget Realism:** $500/month insufficient for automotive (min $1.5K, rec $3K-8K, aggressive $8K+)
+- **Phased Strategy:** Launch (months 1-2) → Optimize (3-4) → Scale (5-12) with KPIs per phase
+- **Keyword Taxonomy:** Branded (1299% ROAS) vs. non-branded (68% ROAS) vs. competitor conquest
+- **Audience Strategy:** In-market auto intenders, EV researchers, remarketing (website visitors, YouTube viewers)
+- **Ad Formats:** Responsive Search Ads, extensions (sitelinks, callouts, location), Performance Max Vehicle Ads
+- **Conversion Tracking:** Test-drive booking (primary), brochure download (secondary), offline import (30-90 day lag)
+
 ## Output Format
 
 The skill generates a comprehensive JSON report containing:
@@ -80,14 +101,20 @@ The skill generates a comprehensive JSON report containing:
 - **Competitors**: Analysis of top 5 competitors with positioning insights
 - **Audience**: Demographic, geographic, and interest targeting recommendations
 - **Budget Plan**: Daily budgets, performance estimates, and bidding strategy
+- **Automotive-Specific Outputs** (if automotive niche detected):
+  - Budget tier recommendation (minimum viable / recommended / aggressive)
+  - Phased long-term strategy (12-month roadmap with KPIs per phase)
+  - Keyword taxonomy (branded/non-branded/competitor + negative list starter)
+  - EV messaging guidelines (range reassurance, charging convenience, warranty)
+  - Audience + retargeting playbook (in-market, remarketing, life events)
 
-Outputs are saved to `data/google-ads-research-{YYYY-MM-DD}.json` with a summary presented in the console.
+Outputs are saved to `data/strategy-{model-slug}-{YYYY-MM-DD}.json` (e.g. `strategy-vf3-2026-06-30.json`) with a summary in the console.
 
 ## Campaign Creation
 
 ### Process Flow
 
-1. LLM generates 10-15 ad copy variations based on research plan
+1. Generates ad copy variations (currently template-based placeholders; real Vinfast-relevant copy via agent-layered LLM is planned — see `generate_ad_copy` TODO)
 2. Policy screening rejects obvious violations before human review
 3. User approves specific variations (e.g., "1,3,5,8")
 4. Campaign deployed via Google Ads API (Search, Manual CPC)
@@ -128,10 +155,17 @@ Campaign creation requires:
 The system includes:
 - Mock client for development without credentials
 - Batch processing for keywords and ads (groups of 10)
-- Retry logic for rate limits (429 errors)
+- Retry logic for rate limits (GoogleAdsException RESOURCE_EXHAUSTED, exp backoff)
 - Comprehensive error handling
 
 ## Monitoring Capabilities
+
+> **⚠️ ALPHA — not yet verified against live Google Ads API.** Known gaps
+> (fix plan phases 06-07, pending): monitor uses `load_from_storage()` while
+> deploy uses `load_from_env()` (cred mismatch); `login_customer_id` used as
+> query `customer_id` (wrong for MCC); `datetime.utcnow()` deprecated. GAQL
+> query logic is real but untested end-to-end. Run only against a Google Ads
+> **test account** until verified.
 
 ### Automated Monitoring
 
@@ -150,6 +184,28 @@ python3 scripts/monitor.py --mode report
 # Run anomaly detection only
 python3 scripts/monitor.py --mode detect
 ```
+
+## Optimization Capabilities (monthly review loop)
+
+After `monitor.py` has collected ≥30 days of `daily_metrics`, run `optimize.py`
+for a period-over-period review + actionable plan for the next month. Same
+track → analyze → improve loop as polymarket-signals calibration.
+
+```bash
+# Last 30d vs previous 30d, keyword-level (default, most actionable)
+python3 scripts/optimize.py
+
+# Campaign/ad_group level, custom period
+python3 scripts/optimize.py --entity campaign --days 30
+
+# JSON for agent/pipe (recommended: agent layers LLM reasoning on top)
+python3 scripts/optimize.py --json
+```
+
+**Output per run:** period summary vs baseline (clicks/cost/conv/CVR/CPA deltas),
+🏆 top performers (→ SCALE), 🗑️ wasted spend (→ PAUSE/negative), CVR-drop watch,
+and a concrete action plan. Actions are logged to `optimization_log` table
+(for impact tracking next run). Run monthly (cron) after the campaign matures.
 
 ### Data Flow Architecture
 
@@ -305,19 +361,23 @@ python3 scripts/_store.py init
 
 ### First Campaign (15 min)
 
-1. **Research**:
+1. **Research** (budget-aware strategy — Vinfast VF3 default, Vietnam market):
 ```bash
-python3 scripts/research.py --niche "web design agency" --location "Austin, TX" --budget 500
+python3 scripts/research.py --budget 10000000 --model vf3 --goal-sales 2
 ```
-Output: `data/google-ads-research-{date}.json`
+Budget in VND. Honest projections + tier + keyword seeds.
+Output: `data/strategy-vf3-{date}.json`
 
-2. **Review + Create**:
+2. **Review + Create** (interactive — NOT cron-safe; needs Google Ads creds):
 ```bash
-python3 scripts/creator.py --plan data/google-ads-research-{date}.json --budget 500
+python3 scripts/creator.py --plan data/strategy-vf3-{date}.json
+# Dry-run (no creds, no spend): add --mock
 ```
-- Review ad copy variations
-- Enter approved numbers (e.g., "1,3,5")
-- Confirm deployment
+- Budget guardrail checked (MONTHLY_BUDGET env cap)
+- Policy screening on ad copy
+- Interactive approval (`input()`) — approve variations by number (e.g. "1,3,5")
+- Deploys via `deploy.deploy_full_campaign` (REAL) — or `--mock` dry-run
+- **Cron/non-tty runs abort cleanly without deploying** (Phase 03 async gate planned)
 
 3. **Monitor** (automatic via cron, or manual):
 ```bash

@@ -1,119 +1,158 @@
 #!/usr/bin/env python3
+"""Budget-aware Google Ads strategy generator for Vinfast (Vietnam market).
+
+Replaces the previous mock. Produces HONEST projections (clicks → leads → sales)
+from industry benchmarks + recommends model/geo/approach for the given budget.
+Deterministic core via _budget_calc; keyword seeds inline for VF-focus.
+
+Usage:
+  python3 research.py --budget 10000000 --model vf3 --goal-sales 2
+  python3 research.py --budget 5000000 --model vf3           # no goal = projection only
+
+This is the deterministic spine. LLM enhancement (ad-copy angles, keyword
+expansion, competitor messaging) is layered by the agent on top of this output.
+"""
+from __future__ import annotations
 import argparse
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Any
+
+from _budget_calc import (
+    project, budget_tier, assess_goal, model_info, VINFAST_MODELS,
+)
+
+# ── Keyword seeds (Vietnam, VF-focused). Full taxonomy in references/. ─────
+KEYWORD_SEEDS = {
+    "vf3": {
+        "branded": ["vinfast vf3", "vf3", "xe vf3", "vinfast vf3 plus"],
+        "non_branded": ["xe điện mini", "xe điện giá rẻ", "xe điện vinfast",
+                        "xe ô tô điện nhỏ"],
+        "intent": ["giá vf3", "đặt lái thử vf3", "mua vf3 trả góp",
+                   "vf3 bao nhiêu tiền"],
+        "competitor_conquest": ["wuling air", "mini ev", "mg xe điện"],
+        "negative": ["vf3 cũ", "phụ tùng vf3", "review vf3", "tin tức vf3",
+                     "vf3 second hand", "bán vf3 đã qua sử dụng"],
+    },
+    # Generic seeds for non-VF3 models (VF3 is the recommended focus)
+    "_default": {
+        "branded": ["vinfast {m}", "{m}", "xe {m}"],
+        "non_branded": ["xe điện suv", "xe điện vinfast", "xe ô tô điện"],
+        "intent": ["giá {m}", "đặt lái thử {m}", "mua {m} trả góp"],
+        "competitor_conquest": [],
+        "negative": ["{m} cũ", "phụ tùng {m}", "review {m}", "tin tức {m}"],
+    },
+}
 
 
-def research_keywords(niche: str, location: str) -> List[Dict[str, Any]]:
-    print(f"[KEYWORDS] Researching keywords for '{niche}' in '{location}'")
-    keywords = [
-        {"keyword": f"{niche} near me", "search_volume_estimate": "high", "competition": "medium", "intent": "transactional", "suggested_bid_cpc": 8.50, "match_type": "phrase"},
-        {"keyword": f"best {niche} {location}", "search_volume_estimate": "medium", "competition": "high", "intent": "transactional", "suggested_bid_cpc": 12.00, "match_type": "phrase"},
-        {"keyword": f"{niche} services", "search_volume_estimate": "high", "competition": "medium", "intent": "informational", "suggested_bid_cpc": 6.75, "match_type": "phrase"}
-    ]
-    print(f"[KEYWORDS] Found {len(keywords)} keywords")
-    return keywords
+def get_keyword_seeds(model_slug: str) -> dict:
+    """Return keyword seeds for a model, expanding {m} placeholder for non-VF3."""
+    seeds = KEYWORD_SEEDS.get(model_slug, KEYWORD_SEEDS["_default"])
+    if model_slug == "vf3":
+        return seeds
+    return {k: [s.replace("{m}", model_slug) for s in v] for k, v in seeds.items()}
 
 
-def analyze_competitors(niche: str, location: str) -> List[Dict[str, Any]]:
-    print(f"[COMPETITORS] Analyzing competitors for '{niche}' in '{location}'")
-    competitors = [
-        {"name": f"Leading {niche.title()} Co", "headline": f"Expert {niche.title()} Services", "positioning": "Premium service provider", "gaps": ["Limited online presence", "No weekend service"]},
-        {"name": f"{location.title()} {niche.title()} Pros", "headline": f"Affordable {niche.title()} Solutions", "positioning": "Budget-friendly provider", "gaps": ["Lower quality perception", "Limited service area"]}
-    ]
-    print(f"[COMPETITORS] Analyzed {len(competitors)} competitors")
-    return competitors
+def build_strategy(budget_vnd: int, model_slug: str, market: str,
+                   goal_sales: int | None) -> dict:
+    """Build full strategy dict: projection + tier + goal + model + keywords."""
+    m = model_info(model_slug)
+    proj = project(budget_vnd)
+    tier_key, tier_label, tier_note = budget_tier(proj.budget_usd)
+    strategy = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "market": market,
+        "model": {"slug": m.slug, "name": m.name, "price_vnd": m.price_vnd,
+                  "segment": m.segment, "competitors": m.competitors,
+                  "positioning": m.positioning, "budget_fit": m.budget_fit},
+        "budget": {"monthly_vnd": budget_vnd, "monthly_usd": proj.budget_usd,
+                   "daily_usd": proj.daily_budget_usd, "tier": tier_key,
+                   "tier_label": tier_label, "tier_note": tier_note},
+        "projection": {
+            "clicks_per_month": proj.clicks_per_month,
+            "leads_per_month": proj.leads_per_month,
+            "sales_per_month": proj.sales_per_month,
+            "cpl_usd": proj.cpl_usd, "cpa_usd": proj.cpa_usd,
+            "months_to_smart_bidding": proj.months_to_smart_bidding,
+        },
+        "keyword_seeds": get_keyword_seeds(model_slug),
+    }
+    if goal_sales is not None:
+        ga = assess_goal(budget_vnd, goal_sales)
+        strategy["goal_assessment"] = {
+            "goal_sales": ga.goal_sales, "realistic_sales": ga.realistic_sales,
+            "achievable": ga.achievable, "budget_needed_vnd": ga.budget_needed_vnd,
+            "verdict": ga.verdict,
+        }
+    return strategy
 
 
-def determine_audience(niche: str, location: str, goal: str) -> Dict[str, Any]:
-    print(f"[AUDIENCE] Determining audience for '{niche}' in '{location}' with goal '{goal}'")
-    audience = {"demographics": {"age_range": "25-65", "gender": "All", "income_level": "Middle to High"}, "locations": [location], "interests": [f"{niche} services", "home improvement", "local businesses"]}
-    print(f"[AUDIENCE] Generated audience profile")
-    return audience
+def print_strategy(s: dict) -> None:
+    """Print human-readable honest strategy report."""
+    m, b, p = s["model"], s["budget"], s["projection"]
+    line = "═" * 60
+    print(f"\n{line}\n🎯 GOOGLE ADS STRATEGY — {m['name']} ({s['market'].upper()})\n{line}")
+    print(f"📌 Model: {m['name']} — {m['segment']}")
+    print(f"   Giá ~{m['price_vnd']:,} VND | Cạnh tranh: {', '.join(m['competitors'])}")
+    print(f"   {m['positioning']}")
+    print(f"\n💰 Budget: {b['monthly_vnd']:,} VND/tháng (~${b['monthly_usd']:,.0f} USD, "
+          f"${b['daily_usd']:.2f}/ngày)")
+    print(f"   Tier: {b['tier_label']} — {b['tier_note']}")
+    print(f"\n📊 DỰ KIẾN (industry benchmark: CPC $2.41, CVR 7.76%, lead→sale 10%):")
+    print(f"   • Clicks/tháng:     {p['clicks_per_month']:.0f}")
+    print(f"   • Leads (lái thử): {p['leads_per_month']:.1f}")
+    print(f"   • Sales (xe):      {p['sales_per_month']:.2f}")
+    print(f"   • Cost/lead:       ${p['cpl_usd']:.2f}")
+    cpa = p['cpa_usd']
+    print(f"   • Cost/sale (CPA): {'${:,.0f}'.format(cpa) if cpa else 'N/A (budget quá thấp)'}")
+    sb = p['months_to_smart_bidding']
+    print(f"   • Smart bidding sau: {sb} tháng" if sb else
+          "   • Smart bidding: KHÔNG reach (budget quá thấp)")
+    if "goal_assessment" in s:
+        ga = s["goal_assessment"]
+        print(f"\n🎯 GOAL CHECK (mục tiêu {ga['goal_sales']} xe/tháng):")
+        print(f"   {ga['verdict']}")
+    kw = s["keyword_seeds"]
+    print(f"\n🔑 KEYWORD SEEDS ({m['slug'].upper()}):")
+    print(f"   Branded:     {', '.join(kw['branded'][:4])}")
+    print(f"   Non-branded: {', '.join(kw['non_branded'][:4])}")
+    print(f"   Intent:      {', '.join(kw['intent'][:4])}")
+    if kw["competitor_conquest"]:
+        print(f"   Competitor:  {', '.join(kw['competitor_conquest'][:3])}")
+    print(f"   Negative:    {', '.join(kw['negative'][:4])}")
+    print(f"\n💡 MODEL FIT: {m['budget_fit']}")
+    print(f"📖 Full taxonomy/benchmarks: references/automotive-keyword-taxonomy.md, "
+          f"automotive-benchmarks.md")
+    print(f"{line}\n")
 
 
-def calculate_budget(budget: int, keywords: List[Dict[str, Any]]) -> Dict[str, Any]:
-    print(f"[BUDGET] Calculating budget allocation for ${budget}")
-    daily = round(budget / 30, 2)
-    max_daily = round(daily * 2, 2)
-    avg_cpc = sum(k.get("suggested_bid_cpc", 8.0) for k in keywords) / len(keywords) if keywords else 8.0
-    estimated_monthly_clicks = int((budget / avg_cpc) * 0.7)
-    estimated_monthly_leads = int(estimated_monthly_clicks * 0.1)
-    estimated_cpl = round(budget / estimated_monthly_leads, 2) if estimated_monthly_leads > 0 else 0
-    budget_plan = {"daily_budget": daily, "max_daily_budget": max_daily, "bid_strategy": "Manual CPC", "estimated_monthly_clicks": estimated_monthly_clicks, "estimated_cpc_range": [round(avg_cpc * 0.7, 2), round(avg_cpc * 1.3, 2)], "estimated_monthly_leads": estimated_monthly_leads, "estimated_cpl": estimated_cpl}
-    print(f"[BUDGET] Daily budget: ${daily}, Max daily: ${max_daily}")
-    return budget_plan
+def save_strategy(s: dict, data_dir: Path) -> Path:
+    data_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%Y-%m-%d")
+    fp = data_dir / f"strategy-{s['model']['slug']}-{ts}.json"
+    fp.write_text(json.dumps(s, indent=2, ensure_ascii=False), encoding="utf-8")
+    return fp
 
 
-def run_research(niche: str, location: str, budget: int, goal: str) -> Dict[str, Any]:
-    print(f"[RESEARCH] Starting Google Ads research for '{niche}'")
-    keywords = research_keywords(niche, location)
-    competitors = analyze_competitors(niche, location)
-    audience = determine_audience(niche, location, goal)
-    budget_plan = calculate_budget(budget, keywords)
-    results = {"niche": niche, "location": location, "monthly_budget": budget, "campaign_goal": goal, "generated_at": datetime.now().isoformat(), "keywords": keywords, "competitors": competitors, "audience": audience, "budget_plan": budget_plan}
-    print(f"[RESEARCH] Research completed successfully")
-    return results
+def main() -> None:
+    ap = argparse.ArgumentParser(description="Vinfast Google Ads budget-aware strategy generator")
+    ap.add_argument("--budget", type=int, required=True,
+                    help="Monthly budget in VND (e.g. 10000000 = 10 triệu)")
+    ap.add_argument("--model", default="vf3", choices=list(VINFAST_MODELS),
+                    help="Vinfast model (default: vf3)")
+    ap.add_argument("--market", default="vn", help="Market code (default: vn)")
+    ap.add_argument("--goal-sales", type=int, default=None,
+                    help="Target vehicle sales/month for honest goal check")
+    ap.add_argument("--json", action="store_true", help="Output JSON only (for agent)")
+    args = ap.parse_args()
 
-
-def save_results(results: Dict[str, Any], data_dir: Path) -> Path:
-    timestamp = datetime.now().strftime("%Y-%m-%d")
-    filename = f"google-ads-research-{timestamp}.json"
-    filepath = data_dir / filename
-    with open(filepath, 'w') as f:
-        json.dump(results, f, indent=2)
-    print(f"[SAVE] Results saved to {filepath}")
-    return filepath
-
-
-def print_summary(results: Dict[str, Any]):
-    niche = results["niche"]
-    location = results["location"]
-    keywords = results["keywords"]
-    competitors = results["competitors"]
-    budget_plan = results["budget_plan"]
-    print("\n" + "="*60)
-    print(f"GOOGLE ADS RESEARCH SUMMARY")
-    print(f"="*60)
-    print(f"Niche: {niche}")
-    print(f"Location: {location}")
-    print(f"Monthly Budget: ${results['monthly_budget']}")
-    print()
-    print(f"KEYWORDS ({len(keywords)} found):")
-    for kw in keywords[:3]:
-        print(f"  • {kw['keyword']} - {kw['search_volume_estimate']} volume, {kw['competition']} competition")
-    if len(keywords) > 3:
-        print(f"  ... and {len(keywords) - 3} more")
-    print()
-    print(f"COMPETITORS ({len(competitors)} analyzed):")
-    for comp in competitors:
-        print(f"  • {comp['name']} - {comp['headline']}")
-    print()
-    print(f"BUDGET PLAN:")
-    print(f"  • Daily Budget: ${budget_plan['daily_budget']}")
-    print(f"  • Max Daily Budget: ${budget_plan['max_daily_budget']}")
-    print(f"  • Estimated Monthly Clicks: {budget_plan['estimated_monthly_clicks']}")
-    print(f"  • Estimated Monthly Leads: {budget_plan['estimated_monthly_leads']}")
-    print(f"  • Estimated CPL: ${budget_plan['estimated_cpl']}")
-    print("="*60)
-
-
-def main():
-    parser = argparse.ArgumentParser(description="Google Ads Research Tool")
-    parser.add_argument("--niche", required=True, help="Target market niche")
-    parser.add_argument("--location", default="United States", help="Geographic location")
-    parser.add_argument("--budget", type=int, default=500, help="Monthly budget")
-    parser.add_argument("--goal", default="leads", help="Campaign goal")
-    args = parser.parse_args()
-    script_dir = Path(__file__).parent
-    data_dir = script_dir.parent / "data"
-    data_dir.mkdir(exist_ok=True)
-    results = run_research(args.niche, args.location, args.budget, args.goal)
-    filepath = save_results(results, data_dir)
-    print_summary(results)
-    print(f"\nFull results saved to: {filepath}")
+    strategy = build_strategy(args.budget, args.model, args.market, args.goal_sales)
+    if args.json:
+        print(json.dumps(strategy, indent=2, ensure_ascii=False))
+        return
+    print_strategy(strategy)
+    fp = save_strategy(strategy, Path(__file__).parent.parent / "data")
+    print(f"💾 Saved: {fp}")
 
 
 if __name__ == "__main__":

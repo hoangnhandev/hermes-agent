@@ -3,6 +3,7 @@
 Sync Google Ads metrics from local SQLite to Cloudflare D1 with retry logic.
 """
 
+import argparse
 import sqlite3
 import json
 import requests
@@ -249,5 +250,4 @@ def main():
 
 
 if __name__ == "__main__":
-    import argparse
     main()

@@ -4,30 +4,35 @@ import time
 from typing import Dict, List, Any, Optional
 from google.ads.googleads.client import GoogleAdsClient
 from google.ads.googleads.errors import GoogleAdsException
-from google.api_core import exceptions
 
 BATCH_SIZE = 10
 
 
-def get_client(env_file: str = "google-ads.env") -> GoogleAdsClient:
+def get_client(env_file: str = "google-ads.env", allow_mock: bool = False) -> GoogleAdsClient:
     """Load Google Ads client from environment file.
 
-    TODO: Implement proper Google Ads client loading
+    Fails HARD on missing/broken credentials unless allow_mock=True (explicit
+    --mock dry-run). Never silently mock — a skill that spends money must not
+    pretend to deploy when it can't. (Fixes H1: silent-mock trust violation.)
     """
-    print(f"[CLIENT] Loading Google Ads client from {env_file}")
-
-    # Check if environment file exists
     if not os.path.exists(env_file):
-        print(f"Warning: {env_file} not found. Using mock client.")
-        return MockGoogleAdsClient()
+        if allow_mock:
+            print(f"[CLIENT] {env_file} not found — MOCK mode (--mock)")
+            return MockGoogleAdsClient()
+        raise RuntimeError(
+            f"{env_file} not found. Set Google Ads credentials (see google-ads.env.example) "
+            "or pass --mock for a dry-run. Refusing to deploy without real credentials.")
 
     try:
         client = GoogleAdsClient.load_from_env(version="v17")
         print("[CLIENT] Google Ads client loaded successfully")
         return client
     except Exception as e:
-        print(f"[CLIENT] Error loading Google Ads client: {e}")
-        return MockGoogleAdsClient()
+        if allow_mock:
+            print(f"[CLIENT] load failed ({e}) — MOCK mode (--mock)")
+            return MockGoogleAdsClient()
+        raise RuntimeError(
+            f"Google Ads client load failed: {e}. Fix credentials in {env_file} or use --mock.")
 
 
 class MockGoogleAdsClient:
@@ -233,18 +238,14 @@ def create_ads(client: GoogleAdsClient, customer_id: str, ad_group_resource_name
 
             # Create responsive search ad
             responsive_ad = ad.ad.responsive_search_ad
-            responsive_ad.headlines.extend([
-                client.get_type("AdTextAsset",
-                                text=headline,
-                                pinned_field=None)
-                for headline in ad_data["headlines"]
-            ])
-            responsive_ad.descriptions.extend([
-                client.get_type("AdTextAsset",
-                                text=description,
-                                pinned_field=None)
-                for description in ad_data["descriptions"]
-            ])
+            for headline in ad_data["headlines"]:
+                asset = client.get_type("AdTextAsset")
+                asset.text = headline
+                responsive_ad.headlines.append(asset)
+            for description in ad_data["descriptions"]:
+                asset = client.get_type("AdTextAsset")
+                asset.text = description
+                responsive_ad.descriptions.append(asset)
 
             # Set final URLs and paths
             responsive_ad.final_urls.extend(["https://example.com"])
@@ -279,20 +280,57 @@ def create_ads(client: GoogleAdsClient, customer_id: str, ad_group_resource_name
 
 
 def retry_with_backoff(func, max_retries: int = 3, base_delay: float = 1.0):
-    """Retry function with exponential backoff for rate limit handling."""
+    """Retry on Google Ads rate-limit (RESOURCE_EXHAUSTED) with backoff.
+
+    Fixes H3: google-ads-python raises GoogleAdsException (wrapping grpc errors)
+    for rate limits, NOT google.api_core.exceptions.TooManyRequests. The old
+    code never retried because it caught the wrong exception type.
+    """
     for attempt in range(max_retries + 1):
         try:
             return func()
-        except exceptions.TooManyRequests as e:
-            if attempt == max_retries:
-                raise e
-
+        except GoogleAdsException as ex:
+            # Rate-limit = RESOURCE_EXHAUSTED error code; retry only on that.
+            rate_limit = any(
+                str(getattr(err.code(), "name", "")).upper() == "RESOURCE_EXHAUSTED"
+                for err in (ex.errors or [])
+            )
+            if attempt == max_retries or not rate_limit:
+                raise
             delay = base_delay * (2 ** attempt)
-            print(f"[RETRY] Rate limited, waiting {delay}s (attempt {attempt + 1}/{max_retries + 1})")
+            print(f"[RETRY] Rate limited, waiting {delay}s "
+                  f"(attempt {attempt + 1}/{max_retries + 1})")
             time.sleep(delay)
-        except Exception as e:
-            # Don't retry on other exceptions
-            raise e
+        except Exception:
+            raise  # don't retry non-rate-limit errors
+
+
+def _pause_campaign(client, customer_id: str, campaign_resource_name: str) -> bool:
+    """Pause a campaign so it stops spending (rollback on partial-deploy failure).
+
+    Safer than remove: human can inspect/fix the orphan. Best-effort — logs loudly
+    on failure so it is never silently left spending. (Fixes H2: orphan campaign
+    with budget but no ads still spends money.)
+    """
+    if isinstance(client, MockGoogleAdsClient):
+        print(f"[ROLLBACK] Mock: would pause orphan {campaign_resource_name}")
+        return True
+    try:
+        service = client.get_service("CampaignService")
+        op = client.get_type("CampaignOperation")
+        op.update.resource_name = campaign_resource_name
+        op.update.status = client.enums.CampaignStatusEnum.PAUSED
+        fm = client.get_type("FieldMask")
+        fm.paths.append("status")
+        op.update_mask.CopyFrom(fm)
+        service.mutate_campaigns(customer_id=customer_id, operations=[op])
+        print(f"[ROLLBACK] Paused orphan campaign {campaign_resource_name} "
+              f"(no ads → would have spent for nothing)")
+        return True
+    except Exception as e:
+        print(f"[ROLLBACK] ⚠️⚠️ Could NOT pause {campaign_resource_name}: {e}\n"
+              f"        → MANUAL CLEANUP NEEDED in Google Ads UI to stop spend!")
+        return False
 
 
 def deploy_full_campaign(client: GoogleAdsClient, customer_id: str, plan: Dict[str, Any], variations: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -320,8 +358,11 @@ def deploy_full_campaign(client: GoogleAdsClient, customer_id: str, plan: Dict[s
     )
 
     if not ad_group_resource_name:
-        print("[DEPLOY] Failed to create ad group")
-        return {"success": False, "error": "Ad group creation failed"}
+        print("[DEPLOY] Failed to create ad group — rolling back "
+              "(pause campaign to stop orphan spend)")
+        _pause_campaign(client, customer_id, campaign_resource_name)
+        return {"success": False,
+                "error": "Ad group creation failed (campaign paused — no orphan spend)"}
 
     # Create keywords
     keywords = [kw["keyword"] for kw in plan.get("keywords", [])]

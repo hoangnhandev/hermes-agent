@@ -233,7 +233,7 @@ class DailyReportGenerator:
 
         suggestions = self.llm_generate_suggestions(context)
         if suggestions:
-            report += "🤖 *AI Suggestions*\n"
+            report += "ℹ️ *Ghi chú heuristic (LLM chưa wire)*\n"
             report += suggestions + "\n\n"
 
         # Footer
