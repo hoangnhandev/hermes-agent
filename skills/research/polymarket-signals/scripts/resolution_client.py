@@ -154,12 +154,16 @@ def main():
     sp.add_argument("--limit", type=int, default=20)
     args = p.parse_args()
 
-    if args.cmd == "check":
-        result = run_resolution_check(args.limit)
+    # Default to 'check' when no subcommand given (hermes --script mode)
+    cmd = args.cmd or "check"
+    limit = getattr(args, "limit", 100)
+
+    if cmd == "check":
+        result = run_resolution_check(limit)
         print(f"Resolution check: {result['n_resolved']} resolved, "
               f"{result['n_quarantined']} quarantined, {result['errors']} errors")
 
-    elif args.cmd == "show-pending":
+    elif cmd == "show-pending":
         s.init_db()
         pending = s.get_pending_resolution(limit=args.limit)
         if not pending:
