@@ -143,3 +143,7 @@ apps/desktop/demo/
 .claude/
 .serena/
 # plans/
+
+# Cloudflare wrangler local cache (per-skill) + repomix generated bundles
+.wrangler/
+repomix-output.xml
