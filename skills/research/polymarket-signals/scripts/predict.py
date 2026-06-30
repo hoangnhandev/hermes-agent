@@ -207,6 +207,7 @@ def main():
         alerts = compute_alerts(scan_preds, args.edge_threshold)
         for a in alerts: print(a)
         if not alerts: print("No alerts for this scan.")
+        print("\n📊 Xem chi tiết: https://polymarket.withly.org/")
     else:
         p.print_help()
 if __name__ == "__main__":
