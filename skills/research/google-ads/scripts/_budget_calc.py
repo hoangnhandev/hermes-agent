@@ -9,29 +9,56 @@ Funnel: budget → clicks → leads (test-drive bookings) → sales.
 Rates are industry averages; real results vary by model/geo/copy/landing page.
 """
 from __future__ import annotations
+import math
 from dataclasses import dataclass, field
 
-# ── Industry benchmarks (automotive, WordStream/LocaliQ 2025) ──────────────
-AUTOMOTIVE_CPC_USD = 2.41      # avg cost-per-click (54% lower than general $5.26)
+# ── Industry benchmarks (automotive) ───────────────────────────────────────
+# CPC differs sharply by market. VN CPC is ~76% below US (leadsoff 2025:
+# VN all-industry avg $0.35-0.60 vs WordStream global $5.26). Automotive is
+# medium-high competition in VN, so we use the upper-mid of the VN range.
+# NB: CVR/lead-to-sale below remain US/global benchmarks (VN-specific CVR
+# data is scarce); real VN CVR may be lower → treat sales as upper bound.
+AUTOMOTIVE_CPC_USD = 2.41      # US/global avg (WordStream/LocaliQ 2025 automotive)
+VN_AUTOMOTIVE_CPC_USD = 0.50   # VN automotive est (range $0.30-0.80: branded cheap, intent pricey)
+MARKET_CPC = {"vn": VN_AUTOMOTIVE_CPC_USD, "global": AUTOMOTIVE_CPC_USD}
 AUTOMOTIVE_CVR = 0.0776        # click → lead (test-drive booking) conversion
 TESTDRIVE_TO_SALE = 0.10       # lead (test-drive) → vehicle sale close rate
 # (industry test-drive close rate ~5-20%; 10% is a conservative mid estimate)
 
 VND_PER_USD = 25_000           # approx FX for VND ↔ USD display
 
+
+def market_cpc(market: str) -> tuple[float, str]:
+    """Return (cpc_usd, source_note) for a market code. Defaults to VN.
+
+    Why: $2.41 is the US/global automotive CPC; using it for VN overstates
+    cost ~5x and makes projections needlessly pessimistic. VN default keeps
+    the skill honest for its Vinfast-VN focus.
+    """
+    m = (market or "vn").strip().lower()
+    if m in ("vn", "vietnam", "viet nam"):
+        return (VN_AUTOMOTIVE_CPC_USD,
+                f"VN automotive est ${VN_AUTOMOTIVE_CPC_USD} (range $0.30-0.80)")
+    return (AUTOMOTIVE_CPC_USD,
+            f"US/global automotive ${AUTOMOTIVE_CPC_USD} (WordStream 2025)")
+
 # ── Budget tiers (USD/month) + smart-bidding threshold ─────────────────────
-SMART_BIDDING_MIN_CONVERSIONS = 30  # tCPA/tROAS needs 30 conversions/30d
+SMART_BIDDING_MIN_CONVERSIONS = 30  # tCPA/tROAS needs 30 conversions/30d.
+# "Conversion" here = lead (test-drive booking), the tracked primary
+# conversion; months_to_smart_bidding = 30 / leads_per_month.
 
 TIERS = [
-    # (max_usd, key, label, note)
+    # (max_usd, key, label, note) — qualitative only. Exact clicks + time-to-
+    # smart-bidding come from the projection (they depend on market CPC, so we
+    # don't hardcode them here — hardcoding drifts as CPC changes by market).
     (500, "testing", "Testing only",
-     "Quá thấp để tối ưu. Chỉ thu data. ~6-7 clicks/ngày. Không reach smart bidding (2+ tháng)."),
+     "Quá thấp để tối ưu. Chỉ thu data, 1-2 từ khóa. (Xem months_to_smart_bidding ở projection.)"),
     (1500, "min_viable", "Minimum viable",
-     "Đủ đo lường: 1 thành phố, 1-2 model. 20-40 clicks/ngày. Smart bidding 1-2 tháng."),
+     "Đủ đo lường: 1 thành phố, 1-2 model."),
     (3000, "recommended", "Recommended",
-     "Đa model, national VN. 40-110 clicks/ngày. Smart bidding 2-4 tuần."),
+     "Đa model, national VN."),
     (8000, "aggressive", "Aggressive growth",
-     "Performance Max Vehicle Ads + competitor conquest. 110+ clicks/ngày."),
+     "Performance Max Vehicle Ads + competitor conquest."),
     (float("inf"), "enterprise", "Enterprise",
      "Full funnel, multi-region. Reserved cho dealer lớn / brand campaign."),
 ]
@@ -92,14 +119,28 @@ class Projection:
     leads_per_month: float        # test-drive bookings
     sales_per_month: float        # estimated vehicle sales
     cpl_usd: float                # cost per lead
-    cpa_usd: float                # cost per acquisition (sale)
-    months_to_smart_bidding: float
+    cpa_usd: float | None         # cost per acquisition (sale); None if sales==0
+    months_to_smart_bidding: float | None  # None if leads==0 (never reaches threshold)
 
 
 def project(budget_vnd: int, cpc_usd: float = AUTOMOTIVE_CPC_USD,
             cvr: float = AUTOMOTIVE_CVR,
             lead_to_sale: float = TESTDRIVE_TO_SALE) -> Projection:
-    """Project funnel metrics from monthly budget (VND)."""
+    """Project funnel metrics from monthly budget (VND).
+
+    Inputs validated: bad values (negative budget, zero CPC/CVR/close-rate)
+    raise ValueError rather than emitting misleading negatives or div-by-zero.
+    cpa_usd/months_to_smart_bidding are None when sales/leads are 0 (e.g.
+    budget_vnd==0) — JSON consumers must handle null (they are typed Optional).
+    """
+    if budget_vnd < 0:
+        raise ValueError(f"budget_vnd must be >= 0, got {budget_vnd}")
+    if cpc_usd <= 0:
+        raise ValueError(f"cpc_usd must be > 0, got {cpc_usd}")
+    if not 0 < cvr <= 1:
+        raise ValueError(f"cvr must be in (0, 1], got {cvr}")
+    if not 0 < lead_to_sale <= 1:
+        raise ValueError(f"lead_to_sale must be in (0, 1], got {lead_to_sale}")
     budget_usd = budget_vnd / VND_PER_USD
     daily_usd = budget_usd / 30
     clicks = budget_usd / cpc_usd                 # total clicks/month
@@ -141,21 +182,27 @@ def assess_goal(budget_vnd: int, goal_sales: int,
                 cvr: float = AUTOMOTIVE_CVR,
                 lead_to_sale: float = TESTDRIVE_TO_SALE) -> GoalAssessment:
     """Assess if budget can realistically hit goal_sales/month. Honest."""
+    if goal_sales < 1:
+        raise ValueError(f"goal_sales must be >= 1, got {goal_sales}")
     proj = project(budget_vnd, cpc_usd, cvr, lead_to_sale)
     achievable = proj.sales_per_month >= goal_sales
-    # Reverse-funnel: goal_sales → leads needed → clicks → budget
+    # Reverse-funnel: goal_sales → leads needed → clicks → budget.
+    # Round UP (ceil) so the recommended budget always suffices — round() to
+    # nearest million can under-deliver the goal the verdict promises.
     leads_needed = goal_sales / lead_to_sale
     clicks_needed = leads_needed / cvr
     budget_needed_usd = clicks_needed * cpc_usd
-    budget_needed_vnd = int(round(budget_needed_usd * VND_PER_USD / 1_000_000) * 1_000_000)
+    budget_needed_vnd = int(math.ceil(budget_needed_usd * VND_PER_USD / 1_000_000) * 1_000_000)
     if achievable:
         verdict = (f"✅ ĐẠT — budget {budget_vnd:,} VND dự kiến "
-                   f"{proj.sales_per_month} xe/tháng (goal {goal_sales}).")
+                   f"~{proj.sales_per_month} xe/tháng (goal {goal_sales}). "
+                   f"(UPPER BOUND — CVR/lead→sale là benchmark global, VN thực tế có thể thấp hơn.)")
     else:
         verdict = (f"⚠️ KHÔNG ĐẠT — budget {budget_vnd:,} VND dự kiến chỉ "
-                   f"{proj.sales_per_month} xe/tháng (goal {goal_sales}). "
+                   f"~{proj.sales_per_month} xe/tháng (goal {goal_sales}). "
                    f"Cần ~{budget_needed_vnd:,} VND/tháng ({budget_needed_usd:,.0f} USD) "
-                   f"để đạt {goal_sales} xe.")
+                   f"để đạt {goal_sales} xe. "
+                   f"(UPPER BOUND — CVR/lead→sale là benchmark global.)")
     return GoalAssessment(
         goal_sales=goal_sales, realistic_sales=proj.sales_per_month,
         achievable=achievable, budget_needed_vnd=budget_needed_vnd, verdict=verdict,

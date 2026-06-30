@@ -10,8 +10,10 @@ Pending records live in data/pending-approvals/<uuid>.json. Atomic writes
 (tmp+rename). 24h expiry. UUID via secrets.token_hex (unguessable).
 """
 from __future__ import annotations
+import fcntl
 import json
 import secrets
+from contextlib import contextmanager
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any
@@ -19,6 +21,24 @@ from typing import Any
 PENDING_DIR = Path(__file__).parent.parent / "data" / "pending-approvals"
 EXPIRY_HOURS = 24
 STATUSES = ("pending", "approved", "deployed", "rejected", "expired")
+
+
+@contextmanager
+def approval_lock(uuid_: str):
+    """Exclusive per-uuid lock — prevents two concurrent --approve runs from
+    both passing the 'pending' check and double-deploying (double spend).
+
+    Blocks (flock LOCK_EX) until the holder releases. Lock file is separate
+    from the record (.{uuid}.lock) so it isn't swept/expired with the record.
+    """
+    PENDING_DIR.mkdir(parents=True, exist_ok=True)
+    lock_fp = PENDING_DIR / f".{uuid_}.lock"
+    with open(lock_fp, "w") as lf:
+        fcntl.flock(lf, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lf, fcntl.LOCK_UN)
 
 
 def _now() -> datetime:

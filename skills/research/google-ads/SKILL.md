@@ -86,6 +86,7 @@ record + notifies Telegram + exits (cron-safe). Resume via
 
 ### Automotive Domain Knowledge (Vinfast/EV)
 - **Industry Benchmarks:** $2.41 CPC, 7.76% CVR, $38.86 CPL (automotive vs. general $5.26 CPC, 7.52% CVR, $70.11 CPL)
+- **Market-Aware CPC:** US/global automotive $2.41 CPC; **VN ~$0.50** (range $0.30-0.80, ~76% below US — leadsoff 2025). `--market vn` (default) uses VN CPC; `--market global` uses US for comparison. CVR + lead→sale remain global benchmarks (VN-specific data scarce → treat projected sales as an upper bound).
 - **EV Marketing Nuances:** Range/charge anxiety messaging, infrastructure confidence, TCO focus
 - **Vinfast Positioning:** Vietnam #1 EV brand, 10-year warranty, battery lease, national brand pride
 - **Budget Realism:** $500/month insufficient for automotive (min $1.5K, rec $3K-8K, aggressive $8K+)
@@ -161,12 +162,13 @@ The system includes:
 
 ## Monitoring Capabilities
 
-> **⚠️ ALPHA — not yet verified against live Google Ads API.** Known gaps
-> (fix plan phases 06-07, pending): monitor uses `load_from_storage()` while
-> deploy uses `load_from_env()` (cred mismatch); `login_customer_id` used as
-> query `customer_id` (wrong for MCC); `datetime.utcnow()` deprecated. GAQL
-> query logic is real but untested end-to-end. Run only against a Google Ads
-> **test account** until verified.
+> **⚠️ ALPHA — not yet verified against a live Google Ads API account.**
+> The cred-loading bugs from the first prototype (`load_from_storage` vs
+> `load_from_env`, `login_customer_id` vs `customer_id`, `datetime.utcnow`)
+> are **fixed**. What remains unverified is end-to-end: the GAQL query logic
+> is real but has never run against a live account, so results may be wrong
+> in ways static review can't catch. **Run only against a Google Ads test
+> account** until verified against live data.
 
 ### Automated Monitoring
 
@@ -215,7 +217,7 @@ The monitoring system follows a robust data flow:
 1. **Google Ads API** → Query campaigns, metrics, and leads via GAQL
 2. **Local SQLite** → Source of truth for all metrics and anomalies (`campaigns-local.db`)
 3. **Cloudflare D1** → Replica for dashboard and reporting (synced with retry logic)
-4. **Telegram Alerts** → Real-time anomaly notifications and daily reports
+4. **Telegram Alerts** → daily reports only (anomaly pings: **local log only, NOT yet wired to Telegram**)
 
 ### Sync Protocol
 
@@ -223,7 +225,7 @@ Automated synchronization ensures data consistency:
 
 - **Frequency**: Can be run via cron (recommended: every 15-30 minutes during business hours)
 - **Retry Logic**: MAX_RETRIES=3 with exponential backoff (5s, 10s, 20s)
-- **Error Handling**: Tracks consecutive failures and alerts after 3+ failures
+- **Error Handling**: Tracks consecutive failures (alerts are logged locally; Telegram pings NOT yet wired)
 - **Data Integrity**: Reconciles orphan campaigns (marks as archived if deleted externally)
 
 GAQL query for metrics:
@@ -237,6 +239,11 @@ ORDER BY segments.date DESC, campaign.id
 ```
 
 ### Anomaly Detection
+
+> ⚠️ Detected anomalies are written to the local `anomaly_log` table **only**.
+> Telegram pings for anomalies are NOT yet wired (TODO in `monitor.py`).
+> Daily performance reports ARE sent to Telegram. Do not rely on anomaly
+> alerts reaching your phone yet.
 
 Multi-campaign anomaly detection with intelligent baselines:
 
@@ -406,7 +413,35 @@ Add to Hermes cron:
 - **Auth errors**: Verify JWT_SECRET, try clearing cookies
 - **API rate limit**: Check budget, adjust batch size in deploy.py
 
-## 🚀 Go-Live Checklist (drop-in real token → runs immediately)
+## ⚠️ Known Limitations (verified by adversarial review)
+
+Honest gaps surfaced by multi-round review. None are silent lies — listed so
+you know exactly what does NOT work yet:
+
+- **CPA-spike anomaly detection won't fire** until conversion tracking is
+  wired: `has_conversion_tracking` is never set to 1, and `reconcile_campaigns`
+  resets it to 0 each sync. The CPA/CTR/pacing rules exist but gate on this
+  flag, so they are currently inert. (monitor.py — ALPHA)
+- **"Top Keywords" report section renders empty**: monitor collects
+  campaign-level metrics only, not keyword-level. Add keyword metrics before
+  this section is meaningful. (daily_report.py — ALPHA)
+- **Negative keywords are NOT applied at deploy**: research emits a negative
+  list (`vf3 cũ`, `review vf3`, …) but `deploy.py` bids on positive keywords
+  only. Negatives will be wired as campaign/ad-group criteria in a future phase.
+- **Currency is assumed USD**: budgets/cost use USD micros (`amount_micros`).
+  At go-live, confirm the account's `currency_code` — if VND-billed, amounts
+  need a conversion factor.
+- **Date math is UTC**: GAQL `segments.date` is account-local. If the account
+  `time_zone` ≠ UTC (VN is UTC+7), daily-report day boundaries shift by the
+  offset. Confirm/adjust at go-live.
+- **Anomaly → Telegram pings not wired** (anomalies are local-log only; see
+  Anomaly Detection section above).
+
+Research/strategy path (`research.py` + `_budget_calc.py`) has none of these
+gaps — it is pure deterministic math, verified, and the recommended entry point
+until you have a real Google Ads token.
+
+
 
 When you have real Google Ads credentials, this exact sequence takes the skill live:
 
@@ -419,7 +454,7 @@ GOOGLE_ADS_REFRESH_TOKEN=...       # from OAuth flow
 GOOGLE_ADS_CUSTOMER_ID=1234567890  # the CHILD account to query (no dashes)
 GOOGLE_ADS_LOGIN_CUSTOMER_ID=...   # MCC manager (same as customer_id if no MCC)
 GOOGLE_ADS_CONVERSION_ACTION_ID=...
-MONTHLY_BUDGET=500                 # account spend cap (guardrail enforces)
+MONTHLY_BUDGET=500                 # account spend cap in USD (NOT VND — guardrail enforces; warns if >$100k, likely VND-as-USD typo)
 WORKERS_API_URL=https://ads-copilot-api.<your>.workers.dev
 HERMES_SYNC_SECRET=<random>        # MUST match Workers secret
 TELEGRAM_CHAT_ID=<your_chat_id>    # for approval requests + reports

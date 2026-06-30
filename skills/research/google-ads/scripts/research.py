@@ -19,7 +19,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from _budget_calc import (
-    project, budget_tier, assess_goal, model_info, VINFAST_MODELS,
+    project, budget_tier, assess_goal, model_info, market_cpc,
+    VINFAST_MODELS, VN_AUTOMOTIVE_CPC_USD,
 )
 
 # ── Keyword seeds (Vietnam, VF-focused). Full taxonomy in references/. ─────
@@ -57,7 +58,8 @@ def build_strategy(budget_vnd: int, model_slug: str, market: str,
                    goal_sales: int | None) -> dict:
     """Build full strategy dict: projection + tier + goal + model + keywords."""
     m = model_info(model_slug)
-    proj = project(budget_vnd)
+    cpc_usd, cpc_note = market_cpc(market)
+    proj = project(budget_vnd, cpc_usd=cpc_usd)
     tier_key, tier_label, tier_note = budget_tier(proj.budget_usd)
     strategy = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -67,7 +69,8 @@ def build_strategy(budget_vnd: int, model_slug: str, market: str,
                   "positioning": m.positioning, "budget_fit": m.budget_fit},
         "budget": {"monthly_vnd": budget_vnd, "monthly_usd": proj.budget_usd,
                    "daily_usd": proj.daily_budget_usd, "tier": tier_key,
-                   "tier_label": tier_label, "tier_note": tier_note},
+                   "tier_label": tier_label, "tier_note": tier_note,
+                   "cpc_usd_used": cpc_usd, "cpc_source": cpc_note},
         "projection": {
             "clicks_per_month": proj.clicks_per_month,
             "leads_per_month": proj.leads_per_month,
@@ -78,7 +81,7 @@ def build_strategy(budget_vnd: int, model_slug: str, market: str,
         "keyword_seeds": get_keyword_seeds(model_slug),
     }
     if goal_sales is not None:
-        ga = assess_goal(budget_vnd, goal_sales)
+        ga = assess_goal(budget_vnd, goal_sales, cpc_usd=cpc_usd)
         strategy["goal_assessment"] = {
             "goal_sales": ga.goal_sales, "realistic_sales": ga.realistic_sales,
             "achievable": ga.achievable, "budget_needed_vnd": ga.budget_needed_vnd,
@@ -98,7 +101,10 @@ def print_strategy(s: dict) -> None:
     print(f"\n💰 Budget: {b['monthly_vnd']:,} VND/tháng (~${b['monthly_usd']:,.0f} USD, "
           f"${b['daily_usd']:.2f}/ngày)")
     print(f"   Tier: {b['tier_label']} — {b['tier_note']}")
-    print(f"\n📊 DỰ KIẾN (industry benchmark: CPC $2.41, CVR 7.76%, lead→sale 10%):")
+    print(f"\n📊 DỰ KIẾN (CPC {b.get('cpc_usd_used', VN_AUTOMOTIVE_CPC_USD)} — "
+          f"{b.get('cpc_source','')}, CVR 7.76%, lead→sale 10%):")
+    print(f"   ⚠️ Sales/CPA = UPPER BOUND (CVR & lead→sale là benchmark global;")
+    print(f"      thị trường VN thực tế có thể thấp hơn — chưa có data VN-specific).")
     print(f"   • Clicks/tháng:     {p['clicks_per_month']:.0f}")
     print(f"   • Leads (lái thử): {p['leads_per_month']:.1f}")
     print(f"   • Sales (xe):      {p['sales_per_month']:.2f}")

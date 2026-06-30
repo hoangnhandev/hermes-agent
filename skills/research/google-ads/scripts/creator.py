@@ -10,9 +10,9 @@ import os
 import sqlite3
 from datetime import datetime
 from typing import Dict, List, Any, Optional
-from _store import init_db, get_total_existing_daily_budget, get_total_monthly_budget, save_copy
+from _store import init_db, get_total_existing_daily_budget, get_total_monthly_budget, save_copy, save_campaign
 from policy_check import screen_ad_copy
-from approval_gate import write_pending, read_pending, mark_status
+from approval_gate import write_pending, read_pending, mark_status, approval_lock
 # NOTE: deploy is lazy-imported inside deploy_campaign() so creator.py stays
 # importable without the google-ads lib (needed only for actual deployment).
 # telegram_notify is lazy-imported inside cmd_* (needs `requests`).
@@ -90,6 +90,10 @@ def run_budget_guardrails(db: sqlite3.Connection, daily_budget: float) -> bool:
     """
     print(f"[BUDGET] Checking guardrails: daily ${daily_budget:.2f} "
           f"(account cap ${ACCOUNT_MONTHLY_CAP:.0f}/mo)")
+    if ACCOUNT_MONTHLY_CAP > 100000:
+        print(f"⚠️ MONTHLY_BUDGET=${ACCOUNT_MONTHLY_CAP:,.0f}/mo > $100k — looks like "
+              f"VND accidentally written as USD. Guardrail may be decorative. "
+              f"MONTHLY_BUDGET is in USD (e.g. 500), NOT VND.")
     existing_monthly = get_total_monthly_budget(db)        # EXISTING campaigns only
     proposed_monthly = existing_monthly + (daily_budget * 30)
     if proposed_monthly > ACCOUNT_MONTHLY_CAP:
@@ -198,10 +202,13 @@ def _research_to_deploy_plan(research_plan: Dict[str, Any]) -> Dict[str, Any]:
     keywords = [{"keyword": k} for cat in ("branded", "non_branded", "intent")
                 for k in seeds.get(cat, [])]
     daily = budget.get("daily_usd") or round((budget.get("monthly_usd", 0) or 0) / 30, 2)
+    # VN-aware CPC: research.py sets budget.cpc_usd_used per market (VN ~0.50).
+    # Using it for the ad-group bid avoids bidding the US $2.41 on a VN account.
+    cpc = budget.get("cpc_usd_used", 2.41)
     return {
         "niche": model.get("name", "vinfast"),
         "location": {"vn": "Vietnam"}.get(research_plan.get("market", "vn"), "Vietnam"),
-        "budget_plan": {"daily_budget": daily, "estimated_cpc_range": [2.41, 3.5]},
+        "budget_plan": {"daily_budget": daily, "estimated_cpc_range": [cpc, round(cpc * 1.4, 2)]},
         "keywords": keywords,
     }
 
@@ -248,7 +255,10 @@ def cmd_create(args) -> int:
         plan = json.load(f)
 
     script_dir = Path(__file__).parent
-    db = init_db(script_dir.parent / "data" / "ad-copy-learning.db")
+    # Guardrail reads the authoritative campaigns store (campaigns-local.db,
+    # written by monitor after each deploy). The old ad-copy-learning.db never
+    # received campaign rows → cap always saw $0 existing → decorative (C1 fix).
+    db = init_db(script_dir.parent / "data" / "campaigns-local.db")
     monthly_budget = args.budget or plan.get("budget", {}).get("monthly_vnd", 500)
     # plan from research.py stores VND; convert to USD for the legacy deploy path
     if monthly_budget > 100000:  # heuristic: VND values are large
@@ -272,39 +282,82 @@ def cmd_create(args) -> int:
 
 
 def cmd_approve(uuid_: str, indices_str: str, mock: bool) -> int:
-    """Approve mode: read pending → deploy selected variations → notify."""
+    """Approve mode: read pending → guardrail → deploy → notify.
+
+    Holds an exclusive per-uuid lock (C3 fix) so two concurrent --approve runs
+    can't both pass the 'pending' check and double-deploy (double spend).
+    Re-checks the budget guardrail at deploy time (C4 fix): create-time
+    approval doesn't guarantee the cap still holds when deploy actually runs
+    (could be hours later, other campaigns may have been added).
+    """
     from telegram_notify import send_deploy_result  # lazy (needs requests)
 
-    rec = read_pending(uuid_)
-    if not rec:
-        print(f"❌ No pending approval for uuid {uuid_}")
-        return 1
-    if rec["status"] != "pending":
-        print(f"❌ Approval {uuid_} is not pending (status={rec['status']}).")
-        return 1
-    # Parse indices
-    try:
-        indices = [int(x.strip()) - 1 for x in (indices_str or "").split(",") if x.strip()]
-    except ValueError:
-        print("❌ --indices must be comma-separated numbers (e.g. 1,3)")
-        return 1
-    variations = rec["variations"]
-    valid = [i for i in indices if 0 <= i < len(variations)]
-    if not valid:
-        print(f"❌ No valid indices. Pick from 1..{len(variations)}.")
-        return 1
-    approved = [variations[i] for i in valid]
+    with approval_lock(uuid_):
+        rec = read_pending(uuid_)
+        if not rec:
+            print(f"❌ No pending approval for uuid {uuid_}")
+            return 1
+        if rec["status"] != "pending":
+            print(f"❌ Approval {uuid_} is not pending (status={rec['status']}).")
+            return 1
+        # Parse indices
+        try:
+            indices = [int(x.strip()) - 1 for x in (indices_str or "").split(",") if x.strip()]
+        except ValueError:
+            print("❌ --indices must be comma-separated numbers (e.g. 1,3)")
+            return 1
+        variations = rec["variations"]
+        valid = [i for i in indices if 0 <= i < len(variations)]
+        if not valid:
+            print(f"❌ No valid indices. Pick from 1..{len(variations)}.")
+            return 1
+        approved = [variations[i] for i in valid]
 
-    with open(rec["plan_path"]) as f:
-        research_plan = json.load(f)
-    plan = _research_to_deploy_plan(research_plan)  # adapt shape for deploy
-    try:
-        result = deploy_campaign(plan, approved, allow_mock=mock)
-    except RuntimeError as e:
-        print(f"\n❌ Cannot deploy: {e}")
-        send_deploy_result(uuid_, False, str(e))
-        return 1
-    mark_status(uuid_, "deployed" if result.get("success") else "rejected", valid)
+        with open(rec["plan_path"]) as f:
+            research_plan = json.load(f)
+        plan = _research_to_deploy_plan(research_plan)  # adapt shape for deploy
+
+        # C4: re-check budget cap at deploy time against the authoritative store.
+        daily = plan["budget_plan"]["daily_budget"]
+        guard_db = init_db(Path(__file__).parent.parent / "data" / "campaigns-local.db")
+        if not run_budget_guardrails(guard_db, daily):
+            msg = ("Budget cap exceeded at approve time — deploy blocked. "
+                   "Pause another campaign or raise MONTHLY_BUDGET (USD).")
+            print(f"❌ {msg}")
+            send_deploy_result(uuid_, False, msg)
+            return 1
+
+        try:
+            result = deploy_campaign(plan, approved, allow_mock=mock)
+        except RuntimeError as e:
+            print(f"\n❌ Cannot deploy: {e}")
+            send_deploy_result(uuid_, False, str(e))
+            return 1
+        # Atomic status transition (still under the lock). Wrapped so a record-
+        # write failure doesn't mask a successful deploy from the notify below.
+        try:
+            mark_status(uuid_, "deployed" if result.get("success") else "rejected", valid)
+        except Exception as e:
+            print(f"⚠️ mark_status failed ({e}) — record may still show 'pending'.")
+        # C1/C4 completion: persist the deployed campaign so the budget guardrail
+        # counts it on the NEXT approve. Without this, rapid sequential approves
+        # of different uuids each read $0 existing and bypass MONTHLY_BUDGET.
+        # Mock deploys aren't real campaigns → don't record them.
+        if result.get("success") and not mock:
+            try:
+                camp_db = init_db(Path(__file__).parent.parent / "data" / "campaigns-local.db")
+                save_campaign(camp_db, {
+                    "campaign_id": rec.get("campaign_id"),
+                    "niche": plan.get("niche", ""),
+                    "location": str(plan.get("location", "")),
+                    "monthly_budget": daily * 30,
+                    "daily_budget": daily,
+                    "status": "active",
+                })
+            except Exception as e:
+                print(f"⚠️ Could not save campaign to local DB — guardrail may "
+                      f"under-count existing spend next run: {e}")
+
     if result.get("success"):
         detail = (f"{result.get('keywords_created',0)} kw, {result.get('ads_created',0)} ads"
                   + (" [MOCK]" if mock else ""))

@@ -41,18 +41,29 @@ def load_restricted_terms(file_path: Path = None) -> List[str]:
         with open(file_path, 'r') as f:
             content = f.read()
 
-        # Simple parsing - look for lines that start with - or *
-        terms = []
+        # Parse bullet lines, but keep only real terms (drop advisory prose).
+        parsed = []
         for line in content.split('\n'):
             line = line.strip()
-            if line.startswith(('-', '*')) and len(line) > 2:
-                term = line[1:].strip().lower()
-                # Remove any markdown formatting
-                term = term.replace('**', '').replace('*', '').replace('`', '')
-                if term and not term.startswith('#'):
-                    terms.append(term)
+            if not (line.startswith(('-', '*')) and len(line) > 2):
+                continue
+            term = line[1:].strip().lower()
+            term = term.replace('**', '').replace('*', '').replace('`', '').strip()
+            if not term or term.startswith('#'):
+                continue
+            # Skip prose: URLs, parentheticals, bracketed refs, em-dashes, or
+            # long multi-word advisory sentences that aren't real terms.
+            if any(m in term for m in ('http', '(', ')', '[', '—', 'e.g.')):
+                continue
+            if len(term) > 40 or term.count(' ') > 4:
+                continue
+            parsed.append(term)
 
-        return terms if terms else POLICY_RULES["disallowed_terms"]
+        # MERGE (union, deduped) — the file is ADDITIVE only. The built-in short
+        # terms (e.g. "instant", "immediate") must never be dropped, or a
+        # markdown file of advisory prose would silently weaken screening.
+        merged = list(dict.fromkeys(POLICY_RULES["disallowed_terms"] + parsed))
+        return merged or POLICY_RULES["disallowed_terms"]
 
     except Exception as e:
         print(f"[POLICY] Error loading restricted terms: {e}")

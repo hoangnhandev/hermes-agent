@@ -2,8 +2,19 @@
 import os
 import time
 from typing import Dict, List, Any, Optional
-from google.ads.googleads.client import GoogleAdsClient
-from google.ads.googleads.errors import GoogleAdsException
+
+# google-ads is optional at import time so --mock dry-runs work WITHOUT the
+# lib installed (true credential/lib-free dry-run). get_client() enforces
+# availability for LIVE (non-mock) deploys. Review found: previously the
+# top-level import made --mock crash in any env lacking google-ads.
+try:
+    from google.ads.googleads.client import GoogleAdsClient
+    from google.ads.googleads.errors import GoogleAdsException
+    GOOGLEADS_AVAILABLE = True
+except ImportError:
+    GOOGLEADS_AVAILABLE = False
+    GoogleAdsClient = None
+    GoogleAdsException = Exception  # broad fallback; mock path returns early
 from _env import load_google_ads_env
 
 BATCH_SIZE = 10
@@ -16,6 +27,13 @@ def get_client(env_file: str = "google-ads.env", allow_mock: bool = False) -> Go
     --mock dry-run). Never silently mock — a skill that spends money must not
     pretend to deploy when it can't. (Fixes H1: silent-mock trust violation.)
     """
+    if not GOOGLEADS_AVAILABLE:
+        if allow_mock:
+            print("[CLIENT] google-ads lib not installed — MOCK mode (--mock)")
+            return MockGoogleAdsClient()
+        raise RuntimeError(
+            "google-ads library not installed. Install it (`pip install google-ads`) "
+            "for a live deploy, or pass --mock for a dry-run.")
     if not os.path.exists(env_file):
         if allow_mock:
             print(f"[CLIENT] {env_file} not found — MOCK mode (--mock)")
@@ -287,6 +305,12 @@ def retry_with_backoff(func, max_retries: int = 3, base_delay: float = 1.0):
     Fixes H3: google-ads-python raises GoogleAdsException (wrapping grpc errors)
     for rate limits, NOT google.api_core.exceptions.TooManyRequests. The old
     code never retried because it caught the wrong exception type.
+
+    NB: only RESOURCE_EXHAUSTED is retried — the server throttled the request
+    *before* applying it, so retrying these (non-idempotent) creates does not
+    double-create. Transient network errors (where the op may have succeeded
+    server-side but the reply was lost) are intentionally NOT retried here,
+    which avoids duplicate campaigns on partial failure.
     """
     for attempt in range(max_retries + 1):
         try:
@@ -385,11 +409,23 @@ def deploy_full_campaign(client: GoogleAdsClient, customer_id: str, plan: Dict[s
     keyword_resource_names = retry_with_backoff(
         lambda: create_keywords(client, customer_id, ad_group_resource_name, keywords)
     )
+    if not keyword_resource_names:
+        print("[DEPLOY] All keyword batches failed — rolling back "
+              "(pause campaign: no keywords = nothing to bid on)")
+        _pause_campaign(client, customer_id, campaign_resource_name)
+        return {"success": False,
+                "error": "Keyword creation failed for all batches (campaign paused — no orphan)"}
 
     # Create ads (final_url from env; guarded against example.com above)
     ad_resource_names = retry_with_backoff(
         lambda: create_ads(client, customer_id, ad_group_resource_name, variations, final_url)
     )
+    if not ad_resource_names:
+        print("[DEPLOY] All ad batches failed — rolling back "
+              "(pause campaign: an ad group with no ads serves nothing)")
+        _pause_campaign(client, customer_id, campaign_resource_name)
+        return {"success": False,
+                "error": "Ad creation failed for all batches (campaign paused — no orphan)"}
 
     result = {
         "success": True,

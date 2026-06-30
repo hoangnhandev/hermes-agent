@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timezone
+from _env import load_google_ads_env  # self-contained under cron
 
 
 class D1Sync:
@@ -269,6 +270,7 @@ class D1Sync:
 
 def main():
     """Main entry point for standalone sync."""
+    load_google_ads_env()  # HERMES_SYNC_SECRET/WORKERS_API_URL live in google-ads.env
     parser = argparse.ArgumentParser(description='Sync Google Ads data to D1')
     parser.add_argument('--db-path', type=Path,
                        default=Path('data/campaigns-local.db'),

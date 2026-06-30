@@ -11,6 +11,7 @@ import argparse
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
+from _env import load_google_ads_env  # self-contained under cron
 
 
 class DailyReportGenerator:
@@ -198,8 +199,10 @@ class DailyReportGenerator:
 
             # Add pacing info
             daily_budget = campaign.get('daily_budget', 0)
+            pacing_pct = campaign.get('pacing_pct', 0)  # set before the guard:
+            # line below uses pacing_pct unconditionally, so it must be defined
+            # even when daily_budget==0 (else NameError crashes the daily cron).
             if daily_budget > 0:
-                pacing_pct = campaign.get('pacing_pct', 0)
                 report += f"   Budget: ${campaign['cost']:.2f}/${daily_budget:.2f} daily ({pacing_pct:.0f}%)\n"
 
             report += "\n"
@@ -313,6 +316,7 @@ class DailyReportGenerator:
 
 def main():
     """Main entry point."""
+    load_google_ads_env()  # TELEGRAM_* live in google-ads.env; load so cron works
     parser = argparse.ArgumentParser(description='Generate daily Google Ads report')
     parser.add_argument('--date', type=str, help='Date in YYYY-MM-DD format (default: yesterday)')
     parser.add_argument('--db-path', type=Path,
