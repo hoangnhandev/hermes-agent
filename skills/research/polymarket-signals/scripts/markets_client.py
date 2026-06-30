@@ -9,7 +9,7 @@ Usage:
 import argparse
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 import store as s
 from _http import (
@@ -66,6 +66,7 @@ def discover(
     min_liquidity: float = DEFAULT_MIN_LIQUIDITY,
     min_volume: float = DEFAULT_MIN_VOLUME,
     limit: int = DEFAULT_LIMIT,
+    end_date_max: str = None,
 ) -> list[dict]:
     """Discover active markets matching category filters.
 
@@ -82,14 +83,17 @@ def discover(
     all_markets = []
     seen = set()
     for slug in tag_slugs:
-        url = _build_gamma_url("/events", {
+        params = {
             "tag_slug": slug,
             "active": "true",
             "closed": "false",
             "order": "volume",
             "ascending": "false",
             "limit": limit,
-        })
+        }
+        if end_date_max:
+            params["end_date_max"] = end_date_max
+        url = _build_gamma_url("/events", params)
         events = _get(url)
         if not isinstance(events, list):
             continue
@@ -123,6 +127,54 @@ def discover(
                 })
 
     return all_markets
+
+
+def select_universe(
+    categories: list[str] = None,
+    min_liquidity: float = DEFAULT_MIN_LIQUIDITY,
+    min_volume: float = DEFAULT_MIN_VOLUME,
+    limit: int = DEFAULT_LIMIT,
+    max_markets: int = 20,
+    short_term_days: int = 30,
+    short_term_quota: int = 10,
+) -> list[dict]:
+    """Pick the scan universe with a near-term quota.
+
+    Reserves ``short_term_quota`` slots for markets resolving within
+    ``short_term_days`` (so outcomes — and calibration data — accumulate
+    quickly instead of waiting on evergreen year-end markets), then fills the
+    remaining slots with the top-volume general markets. De-duped by
+    condition_id. Pass ``short_term_quota=0`` for the old behaviour.
+    """
+    quota = max(0, min(short_term_quota, max_markets))
+    chosen: list[dict] = []
+    seen: set = set()
+
+    # 1) Near-term markets — highest volume among those ending within the window
+    if quota > 0 and short_term_days > 0:
+        end_max = (datetime.now(timezone.utc) + timedelta(days=short_term_days)
+                  ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        for m in discover(categories, min_liquidity, min_volume, limit,
+                          end_date_max=end_max):
+            cid = m["condition_id"]
+            if cid in seen:
+                continue
+            seen.add(cid)
+            chosen.append(m)
+            if len(chosen) >= quota:
+                break
+
+    # 2) Fill remaining slots with general top-volume markets
+    for m in discover(categories, min_liquidity, min_volume, limit):
+        if len(chosen) >= max_markets:
+            break
+        cid = m["condition_id"]
+        if cid in seen:
+            continue
+        seen.add(cid)
+        chosen.append(m)
+
+    return chosen
 
 
 def run_scan(

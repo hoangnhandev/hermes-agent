@@ -162,6 +162,9 @@ The agent IS the LLM client. This script stays LLM-client-free. The agent handle
 
 1. Agent calls `terminal`: `python3 scripts/predict.py run-scan --max-markets 20`
    - Script creates scan_id, discovers markets, inserts pending predictions, outputs markets JSON
+   - Selection reserves `--short-term-quota` (default 10) slots for markets resolving within
+     `--short-term-days` (default 30); the rest are top-volume general markets. This accelerates
+     calibration — short-term markets resolve in days/weeks instead of waiting on year-end ones.
 2. For each market in the output, agent performs these steps:
    a. `web_search` for context (verbose, time-bracketed snippets)
    b. Agent calls the LLM with the byte-stable system prompt + user msg containing:
@@ -182,8 +185,8 @@ Market data goes into user/tool messages only. This preserves the cache prefix.
 
 - **Uncalibrated alerts**: Every Phase 02 alert carries a paper-trade disclaimer.
   Trust the calibration loop, not individual predictions.
-- **Cost control**: `--max-markets ~20` caps per-scan LLM/web spend. Model pinned
-  to cheap tier via `cron job action=update model=haiku`.
+- **Cost control**: `--max-markets ~20` caps per-scan LLM/web spend (default split: 10
+  short-term + 10 general markets). Model pinned to cheap tier via `cron job action=update model=haiku`.
 - **Category tagging**: Uses `tag_slug=` on `/events` endpoint (Gamma API),
   NOT `tag_id=` on `/markets`. Fallback: keyword derivation from slug/tags.
 - **Price history**: CLOB `/prices-history` requires `startTs`+`endTs` (not

@@ -13,10 +13,12 @@ import store as s
 from _alert import (
     format_alert, format_scan_summary, compute_alerts, MAX_RATIONALE_LEN,
 )
-from markets_client import discover
+from markets_client import discover, select_universe
 
 DEFAULT_EDGE_THRESHOLD = 0.10
 DEFAULT_MAX_MARKETS = 20
+DEFAULT_SHORT_TERM_DAYS = 30
+DEFAULT_SHORT_TERM_QUOTA = 10
 MAX_ALERTS_PER_SCAN = 5
 
 # Prompt injection defense (F-07)
@@ -98,14 +100,23 @@ def run_scan(
     edge_threshold: float = DEFAULT_EDGE_THRESHOLD,
     limit: int = 100,
     max_markets: int = DEFAULT_MAX_MARKETS,
+    short_term_days: int = DEFAULT_SHORT_TERM_DAYS,
+    short_term_quota: int = DEFAULT_SHORT_TERM_QUOTA,
     dry_run: bool = False,
 ) -> dict:
-    """Discover markets, create scan, insert pending rows. Cap by max_markets."""
+    """Discover markets, create scan, insert pending rows. Cap by max_markets.
+
+    Reserves ``short_term_quota`` slots for markets resolving within
+    ``short_term_days`` so outcomes (and calibration data) accumulate quickly.
+    """
     s.init_db()
     ts = datetime.now(timezone.utc).isoformat()
     scan_id = s.create_scan(ts, status="running")
 
-    markets = discover(categories, min_liquidity, min_volume, limit)[:max_markets]
+    markets = select_universe(
+        categories, min_liquidity, min_volume, limit,
+        max_markets, short_term_days, short_term_quota,
+    )
     by_cat = {}
     n_predicted = 0
 
@@ -154,6 +165,8 @@ def _add_scan_args(p):
     p.add_argument("--edge-threshold", type=float, default=DEFAULT_EDGE_THRESHOLD)
     p.add_argument("--limit", type=int, default=100)
     p.add_argument("--max-markets", type=int, default=DEFAULT_MAX_MARKETS)
+    p.add_argument("--short-term-days", type=int, default=DEFAULT_SHORT_TERM_DAYS)
+    p.add_argument("--short-term-quota", type=int, default=DEFAULT_SHORT_TERM_QUOTA)
     p.add_argument("--dry-run", action="store_true")
 def main():
     p = argparse.ArgumentParser(description="Polymarket signal predictor")
@@ -176,7 +189,9 @@ def main():
         cats = [c.strip() for c in args.categories.split(",")]
         result = run_scan(categories=cats, min_liquidity=args.min_liquidity,
             min_volume=args.min_volume, edge_threshold=args.edge_threshold,
-            limit=args.limit, max_markets=args.max_markets, dry_run=args.dry_run)
+            limit=args.limit, max_markets=args.max_markets,
+            short_term_days=args.short_term_days,
+            short_term_quota=args.short_term_quota, dry_run=args.dry_run)
         print(f"Scan #{result['scan_id']}: {result['n_predicted']} markets")
         if not args.dry_run and result.get("markets"):
             print(f"MARKETS_JSON_START\n{json.dumps(result['markets'], default=str)}\nMARKETS_JSON_END")
