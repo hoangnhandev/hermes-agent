@@ -9,7 +9,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Any, Optional
 
 # Add the scripts directory to Python path
@@ -23,6 +23,7 @@ except ImportError:
     GOOGLE_ADS_AVAILABLE = False
 
 from _store import init_campaigns_db, upsert_metric, save_anomaly, get_campaign_baseline_metrics
+from _env import load_google_ads_env
 
 
 class GoogleAdsMonitor:
@@ -34,12 +35,24 @@ class GoogleAdsMonitor:
         self.conn = init_campaigns_db(db_path)
         self.sync_status_path = db_path.parent / "sync-status.json"
 
-        # Initialize Google Ads client if available
+        # Customer ID to query = the child account (GOOGLE_ADS_CUSTOMER_ID env),
+        # NOT login_customer_id (which is the MCC manager). Fixes M2: querying
+        # login_customer_id hits the shell MCC account (no campaigns).
+        self.customer_id = (os.getenv("GOOGLE_ADS_CUSTOMER_ID") or "").replace("-", "").strip()
+
+        # Initialize Google Ads client if available. Fixes M1: use load_from_env
+        # (consistent with deploy.py, reads google-ads.env via _env loader),
+        # NOT load_from_storage (google-ads.yaml).
         self.googleads_client = None
         if GOOGLE_ADS_AVAILABLE:
             try:
-                self.googleads_client = GoogleAdsClient.load_from_storage()
-                print("[Monitor] Google Ads client initialized")
+                load_google_ads_env()  # populate os.environ from google-ads.env
+                self.googleads_client = GoogleAdsClient.load_from_env(version="v17")
+                print(f"[Monitor] Google Ads client initialized "
+                      f"(customer_id={self.customer_id or 'NOT SET'})")
+                if not self.customer_id:
+                    print("[Monitor] ⚠️ GOOGLE_ADS_CUSTOMER_ID not set — "
+                          "GAQL queries will fail. Set it in google-ads.env.")
             except Exception as e:
                 print(f"[Monitor] Google Ads client initialization failed: {e}")
                 self.googleads_client = None
@@ -88,7 +101,7 @@ class GoogleAdsMonitor:
             """
 
             query_response = self.googleads_client.get_service("GoogleAdsService").search(
-                customer_id=self.googleads_client.login_customer_id,
+                customer_id=self.customer_id,
                 query=gaql_query
             )
 
@@ -124,7 +137,7 @@ class GoogleAdsMonitor:
             return []
 
         try:
-            date_range = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
+            date_range = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
 
             gaql_query = f"""
             SELECT
@@ -139,7 +152,7 @@ class GoogleAdsMonitor:
             """
 
             query_response = self.googleads_client.get_service("GoogleAdsService").search(
-                customer_id=self.googleads_client.login_customer_id,
+                customer_id=self.customer_id,
                 query=gaql_query
             )
 
@@ -180,7 +193,7 @@ class GoogleAdsMonitor:
             return []
 
         try:
-            date_range = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
+            date_range = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
 
             gaql_query = f"""
             SELECT
@@ -198,7 +211,7 @@ class GoogleAdsMonitor:
             """
 
             query_response = self.googleads_client.get_service("GoogleAdsService").search(
-                customer_id=self.googleads_client.login_customer_id,
+                customer_id=self.customer_id,
                 query=gaql_query
             )
 

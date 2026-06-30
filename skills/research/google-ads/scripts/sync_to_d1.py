@@ -4,6 +4,7 @@ Sync Google Ads metrics from local SQLite to Cloudflare D1 with retry logic.
 """
 
 import argparse
+import fcntl
 import sqlite3
 import json
 import requests
@@ -12,7 +13,7 @@ import os
 import sys
 from pathlib import Path
 from typing import Dict, List, Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 class D1Sync:
@@ -56,26 +57,40 @@ class D1Sync:
         return [dict(row) for row in cursor.fetchall()]
 
     def get_unsynced_campaigns(self) -> List[Dict[str, Any]]:
-        """Get campaigns that haven't been synced to D1."""
-        cursor = self.conn.cursor()
-        cursor.execute('''
-            SELECT * FROM campaigns
-            WHERE status = 'active'
-            ORDER BY updated_at DESC
-        ''')
+        """Get campaigns updated since the last successful sync (H5 fix).
 
+        Old code returned ALL active campaigns every run → payload grew
+        unbounded + campaigns re-sent every sync. Now bounded by
+        last_campaign_sync_at (tracked in sync-status.json). First run sends all.
+        """
+        status = self._read_status()
+        since = status.get("last_campaign_sync_at")
+        cursor = self.conn.cursor()
+        if since:
+            cursor.execute(
+                "SELECT * FROM campaigns WHERE status='active' AND "
+                "(updated_at > ? OR updated_at IS NULL) ORDER BY updated_at DESC",
+                (since,))
+        else:
+            cursor.execute(
+                "SELECT * FROM campaigns WHERE status='active' ORDER BY updated_at DESC")
         return [dict(row) for row in cursor.fetchall()]
 
     def build_sync_payload(self, metrics: List[Dict[str, Any]],
-                          anomalies: List[Dict[str, Any]],
                           campaigns: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Build payload for D1 sync API."""
+        """Build payload for D1 sync API.
+
+        Q2 fix: anomalies are NOT sent — D1 has no anomalies table and the
+        Workers /api/sync endpoint destructures {metrics,leads,campaigns,
+        ad_groups,ads,keywords} (ignores `anomalies`). Anomalies are a LOCAL
+        concern (anomaly_log + Telegram alert via monitor.py). Add the full
+        stack (D1 table + sync.js + dashboard) before re-including them.
+        """
         return {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "metrics": metrics,
-            "anomalies": anomalies,
             "campaigns": campaigns,
-            "sync_type": "full"
+            "sync_type": "incremental"
         }
 
     def sync_to_d1(self, payload: Dict[str, Any]) -> bool:
@@ -155,29 +170,44 @@ class D1Sync:
 
         self.conn.commit()
 
+    def _read_status(self) -> Dict[str, Any]:
+        """Read sync-status.json (empty-default)."""
+        p = self.db_path.parent / "sync-status.json"
+        if p.exists():
+            try:
+                return json.loads(p.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                pass
+        return {
+            "last_sync_at": None, "last_sync_status": "never_run",
+            "consecutive_failures": 0, "metrics_synced": 0, "leads_synced": 0,
+            "last_campaign_sync_at": None,
+        }
+
+    def _write_status(self, status: Dict[str, Any]) -> None:
+        """Write sync-status.json under an exclusive file lock (H4 fix).
+
+        Prevents two overlapping sync runs (cron + manual) from clobbering
+        each other's consecutive_failures / last_campaign_sync_at.
+        """
+        p = self.db_path.parent / "sync-status.json"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with open(p, "w", encoding="utf-8") as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            try:
+                json.dump(status, f, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
     def log_sync_failure(self, error_message: str):
-        """Log sync failure to sync-status.json."""
-        sync_status_path = self.db_path.parent / "sync-status.json"
-
-        if sync_status_path.exists():
-            with open(sync_status_path, 'r') as f:
-                status = json.load(f)
-        else:
-            status = {
-                "last_sync_at": None,
-                "last_sync_status": "never_run",
-                "consecutive_failures": 0,
-                "metrics_synced": 0,
-                "leads_synced": 0
-            }
-
+        """Log sync failure to sync-status.json (locked)."""
+        status = self._read_status()
         status["last_sync_status"] = "failed"
-        status["last_sync_at"] = datetime.now().isoformat()
+        status["last_sync_at"] = datetime.now(timezone.utc).isoformat()
         status["consecutive_failures"] = status.get("consecutive_failures", 0) + 1
-
-        with open(sync_status_path, 'w') as f:
-            json.dump(status, f, indent=2)
-
+        self._write_status(status)
         print(f"[D1 Sync] Sync failure logged: {error_message}")
 
     def run_sync(self) -> bool:
@@ -196,17 +226,27 @@ class D1Sync:
 
             print(f"[D1 Sync] Found {len(metrics)} metrics, {len(anomalies)} anomalies, {len(campaigns)} campaigns to sync")
 
-            # Build payload
-            payload = self.build_sync_payload(metrics, anomalies, campaigns)
+            # Build payload (Q2: anomalies are local-only, not sent to D1)
+            payload = self.build_sync_payload(metrics, campaigns)
 
             # Sync to D1
             success = self.sync_to_d1(payload)
 
             if success:
-                # Mark as synced
+                # Mark metrics + anomalies as synced locally
                 metric_ids = [m['id'] for m in metrics if 'id' in m]
                 anomaly_ids = [a['id'] for a in anomalies if 'id' in a]
                 self.mark_synced(metric_ids, anomaly_ids)
+
+                # Advance campaign sync watermark (H5) + record success
+                status = self._read_status()
+                now_iso = datetime.now(timezone.utc).isoformat()
+                status["last_campaign_sync_at"] = now_iso
+                status["last_sync_at"] = now_iso
+                status["last_sync_status"] = "success"
+                status["consecutive_failures"] = 0
+                status["metrics_synced"] = status.get("metrics_synced", 0) + len(metric_ids)
+                self._write_status(status)
 
                 print(f"[D1 Sync] Sync completed successfully")
                 return True

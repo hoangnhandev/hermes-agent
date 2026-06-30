@@ -4,6 +4,7 @@ import time
 from typing import Dict, List, Any, Optional
 from google.ads.googleads.client import GoogleAdsClient
 from google.ads.googleads.errors import GoogleAdsException
+from _env import load_google_ads_env
 
 BATCH_SIZE = 10
 
@@ -24,6 +25,7 @@ def get_client(env_file: str = "google-ads.env", allow_mock: bool = False) -> Go
             "or pass --mock for a dry-run. Refusing to deploy without real credentials.")
 
     try:
+        load_google_ads_env(env_file)  # populate os.environ from google-ads.env
         client = GoogleAdsClient.load_from_env(version="v17")
         print("[CLIENT] Google Ads client loaded successfully")
         return client
@@ -205,7 +207,7 @@ def create_keywords(client: GoogleAdsClient, customer_id: str, ad_group_resource
     return created_keywords
 
 
-def create_ads(client: GoogleAdsClient, customer_id: str, ad_group_resource_name: str, ads: List[Dict[str, Any]]) -> List[str]:
+def create_ads(client: GoogleAdsClient, customer_id: str, ad_group_resource_name: str, ads: List[Dict[str, Any]], final_url: str = "https://example.com") -> List[str]:
     """Batch-create responsive search ads in an ad group.
 
     Args:
@@ -248,7 +250,7 @@ def create_ads(client: GoogleAdsClient, customer_id: str, ad_group_resource_name
                 responsive_ad.descriptions.append(asset)
 
             # Set final URLs and paths
-            responsive_ad.final_urls.extend(["https://example.com"])
+            responsive_ad.final_urls.extend([final_url])
             if ad_data.get("path1"):
                 responsive_ad.path1 = ad_data["path1"]
             if ad_data.get("path2"):
@@ -340,6 +342,21 @@ def deploy_full_campaign(client: GoogleAdsClient, customer_id: str, plan: Dict[s
     campaign_name = f"{plan['niche']} - {plan['location']}"
     daily_budget_micros = int(plan['budget_plan']['daily_budget'] * 1000000)
 
+    # M1 guard: block example.com landing URL on a REAL client (mock OK).
+    final_url = os.getenv("GOOGLE_ADS_FINAL_URL", "https://example.com")
+    if "example.com" in final_url and not isinstance(client, MockGoogleAdsClient):
+        return {"success": False,
+                "error": "GOOGLE_ADS_FINAL_URL is example.com — set a real landing "
+                         "URL in google-ads.env before live deploy (ads would point nowhere)."}
+
+    # M2 guard: empty keywords → campaign can't match anything → wasted spend.
+    keywords = [kw["keyword"] for kw in plan.get("keywords", []) if kw.get("keyword")]
+    if not keywords:
+        return {"success": False,
+                "error": "plan has no keywords — research output missing keyword_seeds "
+                         "(branded/non_branded/intent). Nothing to bid on."}
+    print(f"[DEPLOY] {len(keywords)} keywords, final_url={final_url}")
+
     # Create campaign
     campaign_resource_name = retry_with_backoff(
         lambda: create_campaign(client, customer_id, campaign_name, daily_budget_micros)
@@ -364,15 +381,14 @@ def deploy_full_campaign(client: GoogleAdsClient, customer_id: str, plan: Dict[s
         return {"success": False,
                 "error": "Ad group creation failed (campaign paused — no orphan spend)"}
 
-    # Create keywords
-    keywords = [kw["keyword"] for kw in plan.get("keywords", [])]
+    # Create keywords (keywords validated above in M2 guard)
     keyword_resource_names = retry_with_backoff(
         lambda: create_keywords(client, customer_id, ad_group_resource_name, keywords)
     )
 
-    # Create ads
+    # Create ads (final_url from env; guarded against example.com above)
     ad_resource_names = retry_with_backoff(
-        lambda: create_ads(client, customer_id, ad_group_resource_name, variations)
+        lambda: create_ads(client, customer_id, ad_group_resource_name, variations, final_url)
     )
 
     result = {

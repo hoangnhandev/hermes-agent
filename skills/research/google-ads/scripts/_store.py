@@ -1,4 +1,13 @@
 #!/usr/bin/env python3
+"""Consolidated SQLite store for the google-ads skill (campaigns, ad copy,
+daily_metrics, anomaly_log, optimization_log).
+
+Intentionally monolithic: only `creator.py` and `monitor.py` import from here
+(19 functions). A 4-way split (_store_core/_store_reads/_store_metrics/
+_store_anomaly) was considered (M4) but deferred — behavior-neutral refactor
+with import-break risk for 2 callers and no functional gain. Accepted tech
+debt; revisit if a 3rd caller or >1000 lines arrives.
+"""
 import sqlite3
 import json
 from pathlib import Path

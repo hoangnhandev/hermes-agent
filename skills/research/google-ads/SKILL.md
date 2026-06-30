@@ -53,8 +53,9 @@ python3 scripts/creator.py --plan data/strategy-vf3-2026-06-30.json
 python3 scripts/creator.py --plan data/strategy-vf3-2026-06-30.json --mock
 ```
 **Note:** `creator.py` requires `--plan` (inline research not implemented).
-Interactive approval (`input()`) is used — **not cron-safe yet** (Phase 03 async
-`--approve` gate planned). Runs in cron/non-tty will abort cleanly without deploying.
+Approval is async (Phase 03 built): `creator.py --plan X` writes a pending
+record + notifies Telegram + exits (cron-safe). Resume via
+`creator.py --approve <uuid> --indices 1,3` to deploy (or `--reject <uuid>`).
 
 ## Research Capabilities
 
@@ -377,11 +378,12 @@ python3 scripts/creator.py --plan data/strategy-vf3-{date}.json
 - Policy screening on ad copy
 - Interactive approval (`input()`) — approve variations by number (e.g. "1,3,5")
 - Deploys via `deploy.deploy_full_campaign` (REAL) — or `--mock` dry-run
-- **Cron/non-tty runs abort cleanly without deploying** (Phase 03 async gate planned)
+- **Cron/non-tty runs abort cleanly without deploying** (async `--approve` gate built, Phase 03)
+- **Anomaly alerts = LOCAL log only** (anomaly_log table). Anomalies are NOT synced to D1/Telegram yet (Workers /api/sync has no anomalies table); monitor logs them locally. Wire Telegram anomaly pings + D1 anomalies table in a future phase.
 
 3. **Monitor** (automatic via cron, or manual):
 ```bash
-python3 scripts/monitor.py full
+python3 scripts/monitor.py --mode full
 python3 scripts/daily_report.py
 ```
 
@@ -393,7 +395,7 @@ Login with DASHBOARD_PASSWORD
 
 Add to Hermes cron:
 ```bash
-0 */6 * * * cd ~/hermes-agent/skills/research/google-ads && .venv/bin/python3 scripts/monitor.py full
+0 */6 * * * cd ~/hermes-agent/skills/research/google-ads && .venv/bin/python3 scripts/monitor.py --mode full
 0 9 * * * cd ~/hermes-agent/skills/research/google-ads && .venv/bin/python3 scripts/daily_report.py
 ```
 
@@ -403,4 +405,72 @@ Add to Hermes cron:
 - **No data in dashboard**: Verify cron is active, check D1 sync status
 - **Auth errors**: Verify JWT_SECRET, try clearing cookies
 - **API rate limit**: Check budget, adjust batch size in deploy.py
+
+## 🚀 Go-Live Checklist (drop-in real token → runs immediately)
+
+When you have real Google Ads credentials, this exact sequence takes the skill live:
+
+### 1. Fill `google-ads.env` (copy from `google-ads.env.example`)
+```
+GOOGLE_ADS_CLIENT_ID=...           # OAuth client (Google Cloud Console)
+GOOGLE_ADS_CLIENT_SECRET=...
+GOOGLE_ADS_DEVELOPER_TOKEN=...     # starts in TEST mode (test accounts only)
+GOOGLE_ADS_REFRESH_TOKEN=...       # from OAuth flow
+GOOGLE_ADS_CUSTOMER_ID=1234567890  # the CHILD account to query (no dashes)
+GOOGLE_ADS_LOGIN_CUSTOMER_ID=...   # MCC manager (same as customer_id if no MCC)
+GOOGLE_ADS_CONVERSION_ACTION_ID=...
+MONTHLY_BUDGET=500                 # account spend cap (guardrail enforces)
+WORKERS_API_URL=https://ads-copilot-api.<your>.workers.dev
+HERMES_SYNC_SECRET=<random>        # MUST match Workers secret
+TELEGRAM_CHAT_ID=<your_chat_id>    # for approval requests + reports
+```
+⚠️ **CUSTOMER_ID vs LOGIN_CUSTOMER_ID**: `CUSTOMER_ID` = the account holding
+campaigns (queried by monitor). `LOGIN_CUSTOMER_ID` = the MCC manager (only
+differs if you use a manager account). Skill uses `CUSTOMER_ID` for GAQL.
+
+### 2. Install the Google Ads client lib
+```bash
+cd ~/hermes-agent/skills/research/google-ads
+pip install google-ads requests
+```
+
+### 3. Verify each piece (against a TEST account first!)
+```bash
+# Strategy (no creds needed): honest projections
+python3 scripts/research.py --budget 10000000 --model vf3 --goal-sales 2
+
+# Monitor (reads API): should list real campaigns
+python3 scripts/monitor.py --mode sync
+
+# Creator → approval gate (headless): writes pending, notifies Telegram
+python3 scripts/creator.py --plan data/strategy-vf3-<date>.json
+
+# Approve + deploy (REAL — spends money!): run the command Telegram sent you
+python3 scripts/creator.py --approve <uuid> --indices 1,3
+
+# Sync to D1 dashboard
+python3 scripts/sync_to_d1.py
+
+# Monthly review
+python3 scripts/optimize.py
+```
+
+### 4. Dry-run before spending (mock deploy, no API hit)
+```bash
+python3 scripts/creator.py --plan data/strategy-vf3-<date>.json   # create mode
+python3 scripts/creator.py --approve <uuid> --indices 1,3 --mock  # mock deploy
+```
+
+### 5. Go live
+- Switch Developer Token to **Basic Access** (Google review) for prod spend.
+- Set cron (see Cron Schedule above).
+- First `optimize.py` run after 30 days of data.
+
+### Common go-live pitfalls
+- **`GOOGLE_ADS_CUSTOMER_ID not set`** → monitor queries return empty (M2 fix).
+- **Test-account mode** → Developer Token in TEST mode can only manage test
+  accounts; prod needs Basic Access.
+- **`HERMES_SYNC_SECRET` mismatch** → sync 401s; must equal Workers secret.
+- **Telegram not set** → approval requests skipped (creator still writes pending;
+  read the uuid from stdout).
 ```

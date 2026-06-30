@@ -12,8 +12,10 @@ from datetime import datetime
 from typing import Dict, List, Any, Optional
 from _store import init_db, get_total_existing_daily_budget, get_total_monthly_budget, save_copy
 from policy_check import screen_ad_copy
+from approval_gate import write_pending, read_pending, mark_status
 # NOTE: deploy is lazy-imported inside deploy_campaign() so creator.py stays
 # importable without the google-ads lib (needed only for actual deployment).
+# telegram_notify is lazy-imported inside cmd_* (needs `requests`).
 
 MAX_DAILY_MULTIPLIER = 2
 BATCH_SIZE = 10
@@ -29,10 +31,18 @@ def generate_ad_copy(plan: Dict[str, Any], niche: str) -> List[Dict[str, Any]]:
     """
     print(f"[COPY] Generating ad copy variations for '{niche}'")
 
-    # Placeholder copy generation - would be replaced by Hermes LLM
+    # Placeholder copy generation - would be replaced by Hermes LLM (agent-layered).
+    # Accepts BOTH old plan shape (keywords[]) and research.py shape (keyword_seeds).
     variations = []
-    keywords = [kw["keyword"] for kw in plan.get("keywords", [])]
+    if "keyword_seeds" in plan:
+        kw_map = plan["keyword_seeds"]
+        keywords = [k for cat in ("branded", "non_branded", "intent")
+                    for k in kw_map.get(cat, [])]
+    else:
+        keywords = [kw.get("keyword", str(kw)) for kw in plan.get("keywords", [])]
     competitors = plan.get("competitors", [])
+    location = plan.get("location") or {"vn": "Vietnam"}.get(
+        plan.get("market", "vn"), "Vietnam")
 
     # Generate variations with different angles
     angles = [
@@ -42,15 +52,18 @@ def generate_ad_copy(plan: Dict[str, Any], niche: str) -> List[Dict[str, Any]]:
 
     for i in range(12):
         angle = angles[i % len(angles)]
+        # Google Ads RSA limits: headline ≤30 chars, description ≤90. Truncate
+        # placeholder copy to stay policy-valid (real copy via agent-layered LLM).
+        n = niche.title()
         headlines = [
-            f"{angle} {niche.title()} Services",
-            f"Best {niche.title()} in {plan['location']}",
-            f"{niche.title()} Specialists"
+            f"{angle} {n}"[:30],
+            f"Best {n}"[:30],
+            f"{n} {location}"[:30],
         ]
 
         descriptions = [
-            f"Professional {niche} services in {plan['location']}. Contact us today!",
-            f"Local {niche} experts. Quality service at competitive prices."
+            f"Professional {niche} in {location}. Book a test drive today!"[:90],
+            f"Local {niche} experts. Quality service, competitive price."[:90],
         ]
 
         variations.append({
@@ -60,7 +73,8 @@ def generate_ad_copy(plan: Dict[str, Any], niche: str) -> List[Dict[str, Any]]:
             "path2": angle.lower()
         })
 
-    print(f"[COPY] Generated {len(variations)} variations")
+    print(f"[COPY] Generated {len(variations)} variations (placeholder; "
+          f"agent layers real Vinfast copy via LLM)")
     return variations
 
 
@@ -170,96 +184,169 @@ def deploy_campaign(plan: Dict[str, Any], approved_variations: List[Dict[str, An
     return result  # dict: {success, campaign_resource_name, keywords_created, ads_created, ...}
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Google Ads Campaign Creator")
-    parser.add_argument("--plan", type=str, help="Path to research plan JSON file")
-    parser.add_argument("--budget", type=int, help="Monthly budget")
-    parser.add_argument("--niche", type=str, help="Target niche (for inline research)")
-    parser.add_argument("--location", type=str, default="United States", help="Location")
-    parser.add_argument("--mock", action="store_true",
-                        help="Dry-run with mock Google Ads client (no real deploy, no spend)")
+def _research_to_deploy_plan(research_plan: Dict[str, Any]) -> Dict[str, Any]:
+    """Transform research.py output shape → deploy_full_campaign plan shape.
 
-    args = parser.parse_args()
+    research.py emits {model, budget:{monthly_vnd,monthly_usd,daily_usd},
+    keyword_seeds:{branded,non_branded,intent,competitor_conquest,negative}, market}.
+    deploy_full_campaign expects {niche, location, budget_plan:{daily_budget,
+    estimated_cpc_range}, keywords:[{keyword}]}.
+    """
+    model = research_plan.get("model", {})
+    budget = research_plan.get("budget", {})
+    seeds = research_plan.get("keyword_seeds", {})
+    keywords = [{"keyword": k} for cat in ("branded", "non_branded", "intent")
+                for k in seeds.get(cat, [])]
+    daily = budget.get("daily_usd") or round((budget.get("monthly_usd", 0) or 0) / 30, 2)
+    return {
+        "niche": model.get("name", "vinfast"),
+        "location": {"vn": "Vietnam"}.get(research_plan.get("market", "vn"), "Vietnam"),
+        "budget_plan": {"daily_budget": daily, "estimated_cpc_range": [2.41, 3.5]},
+        "keywords": keywords,
+    }
 
-    # Load research plan
-    if args.plan:
-        plan_path = Path(args.plan)
-        if not plan_path.exists():
-            print(f"Error: Plan file not found: {plan_path}")
-            return 1
 
-        with open(plan_path) as f:
-            plan = json.load(f)
-    else:
-        print("Error: Plan file required or inline research not implemented")
-        return 1
+def _generate_and_screen(plan: Dict[str, Any], niche: str, db, daily_budget: float):
+    """Shared create-mode steps: guardrail → generate copy → policy screen.
 
-    # Initialize database
-    script_dir = Path(__file__).parent
-    db = init_db(script_dir.parent / "data" / "ad-copy-learning.db")
-
-    # Calculate daily budget
-    monthly_budget = args.budget or plan.get("monthly_budget", 500)
-    daily_budget = round(monthly_budget / 30, 2)
-
-    # Check budget guardrails
+    Returns (variations, campaign_id) or None on guardrail/policy failure.
+    """
     if not run_budget_guardrails(db, daily_budget):
-        return 1
-
-    # Generate ad copy variations
-    niche = plan.get("niche", args.niche or "target service")
+        return None
     variations = generate_ad_copy(plan, niche)
-
-    # Screen for policy violations
     print("\n[POLICY] Screening ad copy for policy violations")
-    all_passed = True
     for i, var in enumerate(variations):
         result = screen_ad_copy(var["headlines"], var["descriptions"])
         if not result["passed"]:
             print(f"⚠️ Variation {i+1} failed policy check:")
-            for violation in result["violations"]:
-                print(f"   • {violation}")
-            all_passed = False
-        else:
-            if result["warnings"]:
-                print(f"ℹ️ Variation {i+1} has warnings:")
-                for warning in result["warnings"]:
-                    print(f"   • {warning}")
-
-    if not all_passed:
-        print("Policy violations found. Please fix before continuing.")
-        return 1
-
-    # Present for approval
-    approved_indices = present_for_approval(variations)
-    if not approved_indices:
-        return 0
-
-    # Get approved variations
-    approved_variations = [variations[i] for i in approved_indices]
-
-    # Save to learning database
+            for v in result["violations"]:
+                print(f"   • {v}")
+            print("Policy violations found. Fix before requesting approval.")
+            return None
+        if result["warnings"]:
+            print(f"ℹ️ Variation {i+1} warnings: {', '.join(result['warnings'])}")
     campaign_id = f"{niche.replace(' ', '-')}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-    save_copy(campaign_id, approved_variations, "approved", [])
-    save_copy(campaign_id, [v for i, v in enumerate(variations) if i not in approved_indices], "rejected", [])
+    return variations, campaign_id
 
-    # Deploy campaign via deploy.deploy_full_campaign (REAL, or MOCK if --mock)
+
+def cmd_create(args) -> int:
+    """Default mode: generate copy → write pending approval → notify → exit 0.
+
+    Headless-safe (no input()). Does NOT deploy — a human must run
+    `--approve <uuid> --indices ...` to deploy. This is the async gate.
+    """
+    from telegram_notify import send_approval_request  # lazy (needs requests)
+
+    if not args.plan:
+        print("Error: --plan <strategy.json> required in create mode.")
+        return 1
+    plan_path = Path(args.plan)
+    if not plan_path.exists():
+        print(f"Error: Plan file not found: {plan_path}")
+        return 1
+    with open(plan_path) as f:
+        plan = json.load(f)
+
+    script_dir = Path(__file__).parent
+    db = init_db(script_dir.parent / "data" / "ad-copy-learning.db")
+    monthly_budget = args.budget or plan.get("budget", {}).get("monthly_vnd", 500)
+    # plan from research.py stores VND; convert to USD for the legacy deploy path
+    if monthly_budget > 100000:  # heuristic: VND values are large
+        monthly_budget = round(monthly_budget / 25000)
+    daily_budget = round(monthly_budget / 30, 2)
+
+    niche = plan.get("model", {}).get("name") or plan.get("niche") or args.niche or "vinfast"
+    gs = _generate_and_screen(plan, niche, db, daily_budget)
+    if not gs:
+        return 1
+    variations, campaign_id = gs
+
+    uuid_ = write_pending(str(plan_path), niche, variations, campaign_id)
+    print(f"\n📝 Pending approval written: {campaign_id}")
+    print(f"   UUID: {uuid_}")
+    print(f"   Approve: creator.py --approve {uuid_} --indices 1,3")
+    print(f"   Reject:  creator.py --reject {uuid_}")
+    print(f"   (expires in 24h)")
+    send_approval_request(uuid_, niche, variations, campaign_id)
+    return 0
+
+
+def cmd_approve(uuid_: str, indices_str: str, mock: bool) -> int:
+    """Approve mode: read pending → deploy selected variations → notify."""
+    from telegram_notify import send_deploy_result  # lazy (needs requests)
+
+    rec = read_pending(uuid_)
+    if not rec:
+        print(f"❌ No pending approval for uuid {uuid_}")
+        return 1
+    if rec["status"] != "pending":
+        print(f"❌ Approval {uuid_} is not pending (status={rec['status']}).")
+        return 1
+    # Parse indices
     try:
-        result = deploy_campaign(plan, approved_variations, allow_mock=args.mock)
+        indices = [int(x.strip()) - 1 for x in (indices_str or "").split(",") if x.strip()]
+    except ValueError:
+        print("❌ --indices must be comma-separated numbers (e.g. 1,3)")
+        return 1
+    variations = rec["variations"]
+    valid = [i for i in indices if 0 <= i < len(variations)]
+    if not valid:
+        print(f"❌ No valid indices. Pick from 1..{len(variations)}.")
+        return 1
+    approved = [variations[i] for i in valid]
+
+    with open(rec["plan_path"]) as f:
+        research_plan = json.load(f)
+    plan = _research_to_deploy_plan(research_plan)  # adapt shape for deploy
+    try:
+        result = deploy_campaign(plan, approved, allow_mock=mock)
     except RuntimeError as e:
         print(f"\n❌ Cannot deploy: {e}")
+        send_deploy_result(uuid_, False, str(e))
         return 1
+    mark_status(uuid_, "deployed" if result.get("success") else "rejected", valid)
     if result.get("success"):
-        print(f"\n✅ Campaign deployed: {result.get('campaign_resource_name')}")
-        print(f"   Keywords: {result.get('keywords_created', 0)} | "
-              f"Ads: {result.get('ads_created', 0)}")
-        if args.mock:
-            print(f"   ⚠️ MOCK mode — nothing was actually deployed to Google Ads.")
+        detail = (f"{result.get('keywords_created',0)} kw, {result.get('ads_created',0)} ads"
+                  + (" [MOCK]" if mock else ""))
+        print(f"\n✅ Deployed: {result.get('campaign_resource_name')} ({detail})")
+        send_deploy_result(uuid_, True, detail)
+        return 0
     else:
-        print(f"\n❌ Deploy failed: {result.get('error', 'unknown error')}")
+        print(f"\n❌ Deploy failed: {result.get('error', 'unknown')}")
+        send_deploy_result(uuid_, False, result.get("error", "unknown"))
         return 1
 
+
+def cmd_reject(uuid_: str) -> int:
+    """Reject mode: mark pending rejected + notify. No deploy."""
+    from telegram_notify import send_text  # lazy (needs requests)
+    if not read_pending(uuid_):
+        print(f"❌ No pending approval for uuid {uuid_}")
+        return 1
+    mark_status(uuid_, "rejected")
+    print(f"❌ Rejected {uuid_} — nothing deployed.")
+    send_text(f"❌ Approval {uuid_} bị từ chối — không deploy.")
     return 0
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Google Ads Campaign Creator (async approval)")
+    parser.add_argument("--plan", type=str, help="Research strategy JSON (create mode)")
+    parser.add_argument("--budget", type=int, help="Override monthly budget USD (create mode)")
+    parser.add_argument("--niche", type=str, help="Target niche (create mode)")
+    parser.add_argument("--location", type=str, default="United States", help="Location")
+    parser.add_argument("--mock", action="store_true",
+                        help="Mock deploy (no real API, no spend)")
+    parser.add_argument("--approve", metavar="UUID", help="Approve pending uuid + deploy")
+    parser.add_argument("--reject", metavar="UUID", help="Reject pending uuid (no deploy)")
+    parser.add_argument("--indices", type=str, help="Comma-separated variation indices (with --approve)")
+    args = parser.parse_args()
+
+    if args.approve:
+        return cmd_approve(args.approve, args.indices, args.mock)
+    if args.reject:
+        return cmd_reject(args.reject)
+    return cmd_create(args)
 
 
 if __name__ == "__main__":
