@@ -28,6 +28,36 @@ Use this skill when you need comprehensive Google Ads research including:
 
 ## How to Run
 
+### One-shot: budget → staged campaign (Telegram entrypoint)
+
+Say "5 triệu cho vinfast" to Violet-chan → she runs ONE command that researches
+the optimal strategy AND stages the campaign (ad copy + Telegram approval
+request). No multi-step CLI. No Google Ads creds needed to stage — creds only
+at approve time. **Money-safety: it does NOT spend** — a human must approve to
+deploy (the async gate is preserved end-to-end).
+
+```bash
+# "5 triệu cho vinfast"        →  budget 5,000,000 VND, model vf3 (default)
+python3 scripts/stage_campaign.py --budget 5000000
+
+# "10 triệu cho vinfast vf5"
+python3 scripts/stage_campaign.py --budget 10000000 --model vf5
+
+# "8 triệu, mục tiêu 2 xe/tháng"  →  + honest goal check
+python3 scripts/stage_campaign.py --budget 8000000 --goal-sales 2
+```
+
+**Violet-chan mapping** (Vietnamese budget phrase → flags):
+- "X triệu" → `--budget X×1_000_000` (5 triệu = 5000000; "500k" = 500000).
+- "vinfast" alone or "vf3" → `--model vf3` (default; best fit for low budget).
+- "vf5/vf6/vf7/vf8/vf9" → `--model <slug>`.
+- Output: honest strategy summary + a Telegram approval ping + the exact
+  `creator.py --approve <uuid> --indices …` command to finish (spend).
+
+After the approval request lands in Telegram, the user runs the approve
+command to deploy (needs Google Ads creds + Developer Token Basic Access for
+real spend). Until then the campaign is staged, not spending.
+
 ### Research Only (budget-aware strategy generator)
 ```bash
 # Budget-aware strategy — Vinfast VF3 (default), Vietnam market.
@@ -475,7 +505,7 @@ GOOGLE_ADS_REFRESH_TOKEN=...       # from OAuth flow
 GOOGLE_ADS_CUSTOMER_ID=1234567890  # the CHILD account to query (no dashes)
 GOOGLE_ADS_LOGIN_CUSTOMER_ID=...   # MCC manager (same as customer_id if no MCC)
 GOOGLE_ADS_CONVERSION_ACTION_ID=...
-MONTHLY_BUDGET=500                 # account spend cap in USD (NOT VND — guardrail enforces; warns if >$100k, likely VND-as-USD typo)
+MONTHLY_BUDGET=6000000             # account spend cap in VND (e.g. 6000000 = 6 triệu; matches creator.py default). Budget is VND everywhere — see Currency below.
 WORKERS_API_URL=https://ads-copilot-api.<your>.workers.dev
 HERMES_SYNC_SECRET=<random>        # MUST match Workers secret
 TELEGRAM_CHAT_ID=<your_chat_id>    # for approval requests + reports
