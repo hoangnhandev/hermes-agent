@@ -122,3 +122,19 @@ code, kbd, .mono {
 .text-danger { color: var(--danger); }
 .text-warning { color: var(--warning); }
 .mono { font-family: var(--font-mono); }
+
+/* CRM phone link (form-leads) — accent-coloured, monospace dial-out. */
+.link-phone {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.link-phone:hover { text-decoration: underline; }
+
+/* Compact timestamp column (form-leads) — monospace, muted. */
+.data-table .t-time {
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}

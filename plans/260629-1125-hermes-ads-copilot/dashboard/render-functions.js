@@ -151,6 +151,95 @@ function renderLeadSources(sources) {
   });
 }
 
+/* ---------------- Form Leads (CRM list) ---------------- */
+
+// Map vinfast_leads.status → badge class + VN label.
+// Mirrors the badge system in components.css (no new CSS classes invented).
+const FORM_LEAD_STATUS = {
+  new: { cls: 'badge-info', label: 'Mới' },
+  contacted: { cls: 'badge-warning', label: 'Đã liên hệ' },
+  closed: { cls: 'badge-success', label: 'Đã đóng' },
+  spam: { cls: 'badge-neutral', label: 'Spam' },
+};
+
+function renderFormLeads(data) {
+  // No fetch result → data-sync empty state (matches other tabs).
+  if (!data) { showEmptyState('form-leads'); return; }
+
+  // KPI row — totals come from by_status (unfiltered across all rows).
+  const byStatus = data.by_status || {};
+  setKpi('formleads-total', formatNumber(data.total || 0));
+  setKpi('formleads-new', formatNumber(byStatus.new || 0));
+  setKpi('formleads-contacted', formatNumber(byStatus.contacted || 0));
+  setKpi('formleads-closed', formatNumber(byStatus.closed || 0));
+
+  const tbody = document.getElementById('formLeadsTableBody');
+  if (!tbody) return;
+
+  const leads = data.leads || [];
+  if (leads.length === 0) {
+    tbody.innerHTML = emptyRow(7, 'Chưa có lead nào — phiếu đăng ký từ mua-vinfast.com sẽ hiển thị ở đây.');
+    return;
+  }
+
+  tbody.innerHTML = leads.map((lead) => {
+    const st = FORM_LEAD_STATUS[lead.status] || { cls: 'badge-neutral', label: esc(lead.status) };
+
+    // Thời gian: strip fractional seconds if present ("2026-07-01 12:34:56[.123]")
+    // and trim the date to a compact "DD-MM HH:mm" for the narrow column.
+    const dt = formatLeadTime(lead.created_at);
+
+    // SĐT: clickable tel: link (dashboard is authenticated CRM — showing sdt
+    // is the whole point). Empty phone falls back to a muted placeholder.
+    const phoneCell = lead.sdt
+      ? '<a href="tel:' + esc(lead.sdt) + '" class="link-phone">' + esc(lead.sdt) + '</a>'
+      : '<span class="text-muted">—</span>';
+
+    // Lời nhắn: truncate long messages with full text in a title tooltip.
+    const msg = lead.loi_nhan ? truncText(lead.loi_nhan, 40) : '—';
+
+    // Nguồn: prefer utm_source/utm_campaign; fall back to gclid/fbclid ad marker.
+    const src = formatLeadSource(lead);
+
+    return (
+      '<tr>' +
+      '<td class="t-time">' + esc(dt) + '</td>' +
+      '<td>' + esc(lead.ho_ten || '—') + '</td>' +
+      '<td>' + phoneCell + '</td>' +
+      '<td>' + esc(lead.dong_xe || '—') + '</td>' +
+      '<td title="' + esc(lead.loi_nhan || '') + '">' + esc(msg) + '</td>' +
+      '<td>' + src + '</td>' +
+      '<td><span class="badge ' + st.cls + '">' + esc(st.label) + '</span></td>' +
+      '</tr>'
+    );
+  }).join('');
+}
+
+/** Compact VN time: "01-07 12:34" from a SQLite datetime string. */
+function formatLeadTime(raw) {
+  if (!raw) return '—';
+  const m = String(raw).match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}:\d{2})/);
+  return m ? (m[3] + '-' + m[2] + ' ' + m[4]) : String(raw);
+}
+
+/** Truncate text to maxLen chars, appending an ellipsis when cut. */
+function truncText(text, maxLen) {
+  const s = String(text == null ? '' : text);
+  return s.length > maxLen ? s.slice(0, maxLen).trimEnd() + '…' : s;
+}
+
+/** Build the "Nguồn" cell: utm_source/campaign, else ad-click id marker. */
+function formatLeadSource(lead) {
+  if (lead.utm_source) {
+    const parts = [lead.utm_source];
+    if (lead.utm_campaign) parts.push(lead.utm_campaign);
+    return '<span class="text-muted">' + esc(parts.join(' / ')) + '</span>';
+  }
+  if (lead.gclid) return '<span class="badge badge-info">Google Ads</span>';
+  if (lead.fbclid) return '<span class="badge badge-info">Facebook</span>';
+  return '<span class="text-muted">—</span>';
+}
+
 /* ---------------- Keywords / Ad copy ---------------- */
 function renderCopyKeywords(data) {
   if (!data) { showEmptyState('keywords'); return; }

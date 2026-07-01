@@ -3,6 +3,7 @@ import { verifyAuth } from './auth.js';
 import { handleSync } from './sync.js';
 import { handleMetrics } from './metrics.js';
 import { handleLeads } from './leads.js';
+import { handleFormLeads } from './form-leads.js';
 import { handleKeywords } from './keywords.js';
 import { handleBudget } from './budget.js';
 
@@ -77,6 +78,15 @@ export default {
         case '/api/leads':
           if (request.method === 'GET') {
             return handleLeads(request, env);
+          }
+          break;
+
+        // CRM list of form submissions (vinfast_leads). Same auth model as
+        // /api/leads — behind verifyAuth because it exposes PII (phone/name)
+        // to an authenticated dashboard only.
+        case '/api/form-leads':
+          if (request.method === 'GET') {
+            return handleFormLeads(request, env);
           }
           break;
 
