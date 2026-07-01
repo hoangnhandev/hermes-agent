@@ -18,18 +18,17 @@ The codebase is organized into several primary directories:
 
 ## Key Skills
 
-### Polymarket Signals (`skills/research/polymarket-signals/`)
+### Google Ads Copilot (`skills/research/google-ads/`)
 
-The `polymarket-signals` skill is a calibration-driven prediction market signal system designed to identify and alert on significant market movements and predictions.
+The `google-ads` skill is a budget-aware Google Ads management system for the
+Vinfast VF3 campaign (Vietnam market), producing honest performance projections.
 
 **Key Features:**
-- **Data Persistence**: Uses a SQLite store with WAL (Write-Ahead Logging) and flock concurrency for efficient and safe data management.
-- **Market Discovery**: Integrates with the Gamma API to discover events based on specific tag slugs.
-- **Price Analysis**: Fetches real-time price data from CLOB V1 endpoints, calculating midpoints and spreads.
-- **Resolution Tracking**: Monitors market resolutions and extracts outcomes, with quarantine mechanisms for void or non-binary markets.
-- **LLM Prediction**: Employs an agent-driven prediction mode (Mode B) with robust prompt injection defenses and randomized delimiters to ensure prediction integrity.
-- **Alerting**: Generates Telegram-safe alerts with a mandatory "UNCALIBRATED — PAPER TRADE ONLY" disclaimer to ensure responsible usage.
-- **Signal-Only Implementation**: Focused exclusively on signal generation; does not handle trading keys or order placement.
+- **Strategy Engine**: Deterministic budget funnel (budget → clicks → leads → sales) from industry CPC/CVR benchmarks, all in VND.
+- **Deployment Pipeline**: Four tools — `research` → `creator` → `deploy` → `monitor`/`optimize` — behind an async Telegram approval gate (no auto-spend).
+- **Safety Guardrails**: Account-level monthly budget cap, landing-URL + keyword validation, orphan-campaign rollback, centralized VND↔micros conversion.
+- **Observability**: Cron-driven metrics sync to Cloudflare D1 + read-only dashboard (`ads-copilot.withly.org`); monthly optimization review (winners/losers/wasted spend).
+- **Money Safety**: All user-facing amounts in VND; `ACCOUNT_CURRENCY` env drives the VND↔micros conversion for the Google Ads API.
 
 ## Development Standards
 

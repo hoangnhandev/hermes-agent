@@ -40,7 +40,7 @@ Skills focused on data gathering, analysis, and synthesis.
 1. **Input**: A user sends a message via a supported platform (e.g., Telegram).
 2. **Ingestion**: The **Gateway** receives the message and translates it into an internal event.
 3. **Processing**: The **Core Agent** analyzes the event, retrieves relevant memory, and decides if a **Skill** is needed.
-4. **Execution**: If required, the agent invokes a specific skill (e.g., `polymarket-signals`), which interacts with external APIs (Gamma, CLOB V1).
+4. **Execution**: If required, the agent invokes a specific skill (e.g., `google-ads`), which interacts with external APIs (Google Ads, Cloudflare D1).
 5. **Output**: The result is passed back to the agent, formatted by the gateway, and sent back to the user.
 
 ## Infrastructure

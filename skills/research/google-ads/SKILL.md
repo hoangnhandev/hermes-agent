@@ -212,7 +212,7 @@ python3 scripts/monitor.py --mode detect
 
 After `monitor.py` has collected ≥30 days of `daily_metrics`, run `optimize.py`
 for a period-over-period review + actionable plan for the next month. Same
-track → analyze → improve loop as polymarket-signals calibration.
+track → analyze → improve loop (period-over-period calibration).
 
 ```bash
 # Last 30d vs previous 30d, keyword-level (default, most actionable)
