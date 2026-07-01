@@ -14,9 +14,9 @@ Pipeline:
   3. prints the approve command (UUID) so the user/Violet can finish on confirm.
 
 Usage:
-  python3 run.py --budget 5000000                 # VF3 default, VN market (5 triệu)
-  python3 run.py --budget 5000000 --model vf5
-  python3 run.py --budget 10000000 --goal-sales 2  # + honest goal check
+  python3 stage_campaign.py --budget 5000000                 # VF3 default, VN market (5 triệu)
+  python3 stage_campaign.py --budget 5000000 --model vf5
+  python3 stage_campaign.py --budget 10000000 --goal-sales 2  # + honest goal check
 """
 from __future__ import annotations
 import argparse
@@ -25,6 +25,8 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+
+from _env import load_google_ads_env  # so creator's telegram_notify (subprocess) inherits creds
 
 SCRIPT_DIR = Path(__file__).parent
 DATA_DIR = SCRIPT_DIR.parent / "data"
@@ -77,6 +79,12 @@ def main() -> int:
     ap.add_argument("--goal-sales", type=int, default=None,
                     help="Target vehicle sales/month for honest goal check")
     args = ap.parse_args()
+
+    # Load google-ads.env (TELEGRAM_*, GOOGLE_ADS_*) into os.environ so the
+    # creator.py subprocess inherits creds — otherwise telegram_notify skips
+    # the approval ping when this script is invoked directly (not via wrapper).
+    # setdefault: real env (e.g. set by Hermes gateway) wins over the file.
+    load_google_ads_env()
 
     line = "═" * 60
     print(f"\n{line}\n🧠 Bước 1/2 — Nghiên cứu chiến lược ({args.budget:,} VND)\n{line}")
