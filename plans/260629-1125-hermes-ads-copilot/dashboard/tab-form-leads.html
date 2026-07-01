@@ -2,25 +2,25 @@
   tab-form-leads.html — CRM list of form submissions (vinfast_leads).
   Unlike tab-leads.html (Google Ads conversion KPIs/charts), this is a
   per-submission list (one row = one mua-vinfast.com form submit) with a
-  small KPI summary row on top. Vietnamese labels (dashboard is VN-facing).
+  small KPI summary row on top. English labels (consistent with the app).
 -->
 
 <!-- KPI summary row -->
 <div class="kpi-grid">
     <div class="kpi-card">
-        <div class="kpi-top"><span class="kpi-label">Tổng lead</span><span class="kpi-icon" data-icon="inbox"></span></div>
+        <div class="kpi-top"><span class="kpi-label">Total Leads</span><span class="kpi-icon" data-icon="inbox"></span></div>
         <div class="kpi-value" id="formleads-total">--</div>
     </div>
     <div class="kpi-card">
-        <div class="kpi-top"><span class="kpi-label">Mới</span><span class="kpi-icon" data-icon="clock"></span></div>
+        <div class="kpi-top"><span class="kpi-label">New</span><span class="kpi-icon" data-icon="clock"></span></div>
         <div class="kpi-value" id="formleads-new">--</div>
     </div>
     <div class="kpi-card">
-        <div class="kpi-top"><span class="kpi-label">Đã liên hệ</span><span class="kpi-icon" data-icon="phone"></span></div>
+        <div class="kpi-top"><span class="kpi-label">Contacted</span><span class="kpi-icon" data-icon="phone"></span></div>
         <div class="kpi-value" id="formleads-contacted">--</div>
     </div>
     <div class="kpi-card">
-        <div class="kpi-top"><span class="kpi-label">Đã đóng</span><span class="kpi-icon" data-icon="check"></span></div>
+        <div class="kpi-top"><span class="kpi-label">Closed</span><span class="kpi-icon" data-icon="check"></span></div>
         <div class="kpi-value" id="formleads-closed">--</div>
     </div>
 </div>
@@ -29,21 +29,21 @@
 <div class="section-card">
     <div class="section-card-header">
         <div>
-            <div class="section-card-title">Danh sách lead (Form)</div>
-            <div class="section-card-subtitle">Phiếu đăng ký từ mua-vinfast.com — mới nhất trước</div>
+            <div class="section-card-title">Form Leads</div>
+            <div class="section-card-subtitle">Submissions from mua-vinfast.com — newest first</div>
         </div>
     </div>
     <div class="data-table-wrap">
         <table class="data-table" id="formLeadsTable">
             <thead>
                 <tr>
-                    <th>Thời gian</th>
-                    <th>Họ tên</th>
-                    <th>SĐT</th>
-                    <th>Dòng xe</th>
-                    <th>Lời nhắn</th>
-                    <th>Nguồn</th>
-                    <th>Trạng thái</th>
+                    <th>Time</th>
+                    <th>Name</th>
+                    <th>Phone</th>
+                    <th>Model</th>
+                    <th>Message</th>
+                    <th>Source</th>
+                    <th>Status</th>
                 </tr>
             </thead>
             <tbody id="formLeadsTableBody"></tbody>

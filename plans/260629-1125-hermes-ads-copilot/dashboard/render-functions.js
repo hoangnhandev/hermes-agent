@@ -153,12 +153,12 @@ function renderLeadSources(sources) {
 
 /* ---------------- Form Leads (CRM list) ---------------- */
 
-// Map vinfast_leads.status → badge class + VN label.
+// Map vinfast_leads.status → badge class + label.
 // Mirrors the badge system in components.css (no new CSS classes invented).
 const FORM_LEAD_STATUS = {
-  new: { cls: 'badge-info', label: 'Mới' },
-  contacted: { cls: 'badge-warning', label: 'Đã liên hệ' },
-  closed: { cls: 'badge-success', label: 'Đã đóng' },
+  new: { cls: 'badge-info', label: 'New' },
+  contacted: { cls: 'badge-warning', label: 'Contacted' },
+  closed: { cls: 'badge-success', label: 'Closed' },
   spam: { cls: 'badge-neutral', label: 'Spam' },
 };
 
@@ -178,7 +178,7 @@ function renderFormLeads(data) {
 
   const leads = data.leads || [];
   if (leads.length === 0) {
-    tbody.innerHTML = emptyRow(7, 'Chưa có lead nào — phiếu đăng ký từ mua-vinfast.com sẽ hiển thị ở đây.');
+    tbody.innerHTML = emptyRow(7, 'No leads yet — form submissions from mua-vinfast.com will appear here.');
     return;
   }
 
