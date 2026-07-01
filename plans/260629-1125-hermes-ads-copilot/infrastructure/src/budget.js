@@ -30,8 +30,8 @@ export async function handleBudget(request, env) {
         AND dm.entity_type = 'campaign'
         AND dm.date >= ?
         AND dm.date <= ?
+      WHERE c.status IN ('active', 'ENABLED', 'ELIGIBLE', 'SERVING')
       GROUP BY c.campaign_id, c.name, c.daily_budget, c.monthly_budget
-      HAVING c.status = 'active'
     `;
 
     const campaignsResult = await env.DB.prepare(campaignQuery).bind(monthStart, monthEnd).all();
@@ -113,13 +113,6 @@ export async function handleBudget(request, env) {
       days_remaining: daysRemaining
     };
 
-    const pacing = {
-      status: accountPacing < 80 ? 'under_pacing' : accountPacing > 120 ? 'over_pacing' : 'on_track',
-      recommendation: accountPacing < 80 ? 'Increase spend to utilize budget' :
-                     accountPacing > 120 ? 'Reduce spend to avoid overspending' :
-                     'Maintain current spend level'
-    };
-
     const forecast = {
       projected_month_end_spend: parseFloat(forecastMonthEndSpend.toFixed(2)),
       projected_overspend: Math.max(0, forecastMonthEndSpend - accountTotals.total_monthly_budget),
@@ -127,12 +120,34 @@ export async function handleBudget(request, env) {
       confidence_level: daysElapsed > 20 ? 'high' : daysElapsed > 10 ? 'medium' : 'low'
     };
 
+    // Flatten to the field names renderBudget reads. Internal objects stay
+    // descriptive; this block is the adapter to the frontend contract.
+    // pacing[] items: renderPerCampaignPacingTable reads name/daily_budget/
+    // spent/pacing_percent/status.
+    const pacingArr = per_campaign_pacing.map(c => ({
+      name: c.campaign_name,
+      daily_budget: c.daily_budget,
+      spent: c.month_to_date_spend,
+      pacing_percent: c.pacing_pct,
+      status: c.pacing_status
+    }));
+
+    // spend_trend items: renderSpendTrend reads {date, spend} (not daily_spend).
+    const spend_trend_flat = spend_trend.map(t => ({ date: t.date, spend: t.daily_spend }));
+
+    // pacing_overall as a 0-1 fraction (formatPercent multiplies by 100).
+    const pacing_overall = account_totals.pacing_pct / 100;
+
     return new Response(JSON.stringify({
-      per_campaign_pacing,
-      account_totals,
-      pacing,
-      forecast,
-      spend_trend
+      monthly_budget: account_totals.total_monthly_budget,
+      spent: account_totals.total_month_to_date_spend,
+      daily_average: account_totals.daily_avg_spend,
+      today_spend: account_totals.today_spend,
+      eom_forecast: forecast.projected_month_end_spend,
+      pacing: pacingArr,
+      pacing_table: pacingArr,
+      pacing_overall,
+      spend_trend: spend_trend_flat
     }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' }

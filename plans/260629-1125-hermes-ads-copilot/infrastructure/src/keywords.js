@@ -78,6 +78,9 @@ export async function handleKeywords(request, env) {
       clicks: copy.clicks,
       conversions: copy.conversions,
       conversion_rate: parseFloat(copy.conversion_rate.toFixed(2)),
+      // ctr = clicks/impressions (the frontend "CTR" badge). Distinct from
+      // conversion_rate (conversions/clicks) which is CVR.
+      ctr: copy.impressions > 0 ? parseFloat((copy.clicks / copy.impressions * 100).toFixed(2)) : 0,
       created_at: copy.created_at
     }));
 
@@ -138,21 +141,18 @@ export async function handleKeywords(request, env) {
     `;
 
     const suggestionsResult = await env.DB.prepare(suggestionsQuery).all();
+    // Reshape to the field set renderCopyKeywords reads: type / impact / description.
     const suggestions = suggestionsResult.results.map(suggestion => ({
-      keyword: suggestion.text,
-      campaign_id: suggestion.campaign_id,
-      campaign_name: suggestion.campaign_name,
-      impressions: suggestion.impressions,
-      clicks: suggestion.clicks,
-      conversions: suggestion.conversions,
-      conversion_rate: parseFloat(suggestion.conversion_rate.toFixed(2)),
-      cpc: parseFloat(suggestion.cpc.toFixed(2)),
-      suggestion: suggestion.suggestion
+      type: 'keyword',
+      impact: suggestion.conversion_rate > 0
+        ? parseFloat(suggestion.conversion_rate).toFixed(1) + '% CVR'
+        : null,
+      description: suggestion.suggestion
     }));
 
     return new Response(JSON.stringify({
       keywords,
-      ad_copy,
+      best_ad_copy: ad_copy,
       suggestions
     }), {
       status: 200,

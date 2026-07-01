@@ -148,11 +148,36 @@ export async function handleLeads(request, env) {
       avg_value: source.leads > 0 ? parseFloat((source.total_value / source.leads).toFixed(2)) : 0
     }));
 
+    // Time-bucketed lead counts (frontend renderLeads reads today/week/
+    // all_time KPI cards). all_time reuses the already-computed totalLeads.
+    const todayResult = await env.DB.prepare(`
+      SELECT COUNT(*) as n FROM leads l
+      INNER JOIN campaigns c ON l.campaign_id = c.campaign_id
+      WHERE c.has_conversion_tracking = 1 AND DATE(l.conversion_date) = DATE('now')
+    `).all();
+    const today = todayResult.results[0]?.n || 0;
+
+    const weekResult = await env.DB.prepare(`
+      SELECT COUNT(*) as n FROM leads l
+      INNER JOIN campaigns c ON l.campaign_id = c.campaign_id
+      WHERE c.has_conversion_tracking = 1 AND DATE(l.conversion_date) >= DATE('now', '-7 days')
+    `).all();
+    const week = weekResult.results[0]?.n || 0;
+
+    // avg_quality: PROXY — the leads table has no quality score. Use the
+    // fraction of leads with a non-zero conversion_value (a 0-1 value-bearing
+    // ratio). Replace with a real leads.quality column when one exists.
+    const avg_quality = totalLeads > 0
+      ? leads.filter(l => (l.conversion_value || 0) > 0).length / totalLeads
+      : 0;
+
     return new Response(JSON.stringify({
-      leads,
-      summary,
+      today,
+      week,
+      all_time: totalLeads,
+      avg_quality: parseFloat(avg_quality.toFixed(2)),
       trend,
-      source_breakdown
+      sources: source_breakdown
     }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' }

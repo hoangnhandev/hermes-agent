@@ -1,3 +1,9 @@
+// /api/metrics — Overview tab data.
+// Return shape ALIGNED to the dashboard frontend contract (renderOverview +
+// renderPerCampaignTable + renderPerformanceTrend + renderCampaignComparison +
+// renderTopKeywordsTable). Previously returned `kpis` (frontend read `account`),
+// a trend of daily aggregates (frontend read per-campaign {date,campaign,metric_value}),
+// and campaigns missing name/status/objective/pacing — all silently empty.
 export async function handleMetrics(request, env) {
   try {
     const url = new URL(request.url);
@@ -5,17 +11,25 @@ export async function handleMetrics(request, env) {
     const dateTo = url.searchParams.get('date_to');
     const campaignId = url.searchParams.get('campaign_id');
 
-    // Build base query for per-campaign metrics
+    // Per-campaign metrics over the (optional) date range, plus the campaign
+    // fields the per-campaign table renders (name/status/objective) and a
+    // month-to-date cost for the pacing column (conditional SUM so it is
+    // independent of the date filter — pacing is always a monthly concept).
     let query = `
       SELECT
         c.campaign_id,
         c.name as campaign_name,
+        c.status,
+        c.objective,
+        c.daily_budget,
+        c.monthly_budget,
         c.has_conversion_tracking,
         COALESCE(SUM(dm.impressions), 0) as impressions,
         COALESCE(SUM(dm.clicks), 0) as clicks,
         COALESCE(SUM(dm.cost), 0) as cost,
         COALESCE(SUM(dm.conversions), 0) as conversions,
-        COALESCE(SUM(dm.conversion_value), 0) as conversion_value
+        COALESCE(SUM(dm.conversion_value), 0) as conversion_value,
+        COALESCE(SUM(CASE WHEN dm.date >= date('now','start of month') THEN dm.cost ELSE 0 END), 0) as mtd_cost
       FROM campaigns c
       LEFT JOIN daily_metrics dm ON c.campaign_id = dm.entity_id
         AND dm.entity_type = 'campaign'
@@ -23,7 +37,6 @@ export async function handleMetrics(request, env) {
 
     const queryParams = [];
 
-    // Add date filters if provided
     if (dateFrom || dateTo) {
       query += ' AND';
       if (dateFrom && dateTo) {
@@ -38,26 +51,32 @@ export async function handleMetrics(request, env) {
       }
     }
 
-    // Add campaign filter if provided
     if (campaignId) {
       query += ' AND c.campaign_id = ?';
       queryParams.push(campaignId);
     }
 
-    query += ' GROUP BY c.campaign_id, c.name, c.has_conversion_tracking';
+    query += ' GROUP BY c.campaign_id, c.name, c.status, c.objective, c.daily_budget, c.monthly_budget, c.has_conversion_tracking';
 
     const campaignsResult = await env.DB.prepare(query).bind(...queryParams).all();
 
-    // Calculate KPIs for each campaign
+    // Map each campaign to the field set renderPerCampaignTable reads:
+    // name, status, objective, impressions, clicks, cpc, conversions, cost
+    // (for cpl), pacing (%). ctr/cpl kept for completeness.
     const campaigns = campaignsResult.results.map(campaign => {
       const ctr = campaign.clicks > 0 ? (campaign.clicks / campaign.impressions) * 100 : 0;
       const cpc = campaign.clicks > 0 ? campaign.cost / campaign.clicks : 0;
       const cpl = campaign.conversions > 0 ? campaign.cost / campaign.conversions : null;
+      // Pacing = month-to-date spend vs monthly budget (0 if no monthly budget).
+      const pacing = campaign.monthly_budget > 0
+        ? (campaign.mtd_cost / campaign.monthly_budget) * 100
+        : 0;
 
       return {
         campaign_id: campaign.campaign_id,
-        campaign_name: campaign.campaign_name,
-        has_conversion_tracking: !!campaign.has_conversion_tracking,
+        name: campaign.campaign_name,
+        status: campaign.status,
+        objective: campaign.objective,
         impressions: campaign.impressions,
         clicks: campaign.clicks,
         cost: campaign.cost,
@@ -65,27 +84,22 @@ export async function handleMetrics(request, env) {
         conversion_value: campaign.conversion_value,
         ctr: parseFloat(ctr.toFixed(2)),
         cpc: parseFloat(cpc.toFixed(2)),
-        cpl: cpl ? parseFloat(cpl.toFixed(2)) : null
+        cpl: cpl ? parseFloat(cpl.toFixed(2)) : null,
+        pacing: parseFloat(pacing.toFixed(1))
       };
     });
 
-    // Calculate account totals in JavaScript (not SQL)
-    const accountTotals = campaigns.reduce((acc, campaign) => {
-      acc.impressions += campaign.impressions;
-      acc.clicks += campaign.clicks;
-      acc.cost += campaign.cost;
-      acc.conversions += campaign.conversions;
-      acc.conversion_value += campaign.conversion_value;
+    // Account-level totals (frontend reads data.account.*).
+    const accountTotals = campaigns.reduce((acc, c) => {
+      acc.impressions += c.impressions;
+      acc.clicks += c.clicks;
+      acc.cost += c.cost;
+      acc.conversions += c.conversions;
+      acc.conversion_value += c.conversion_value;
       return acc;
-    }, {
-      impressions: 0,
-      clicks: 0,
-      cost: 0,
-      conversions: 0,
-      conversion_value: 0
-    });
+    }, { impressions: 0, clicks: 0, cost: 0, conversions: 0, conversion_value: 0 });
 
-    const accountKPIs = {
+    const account = {
       impressions: accountTotals.impressions,
       clicks: accountTotals.clicks,
       cost: accountTotals.cost,
@@ -96,33 +110,31 @@ export async function handleMetrics(request, env) {
       cpl: accountTotals.conversions > 0 ? parseFloat((accountTotals.cost / accountTotals.conversions).toFixed(2)) : null
     };
 
-    // Get trend data (last 30 days)
+    // Performance trend: per-campaign daily series. renderPerformanceTrend reads
+    // {date, campaign, metric_value} and draws one line per campaign.
+    // metric_value = clicks (the most stable activity signal; conversions are
+    // sparse early on). y-axis labelled "Value" in the chart.
     const trendQuery = `
       SELECT
-        date,
-        SUM(impressions) as impressions,
-        SUM(clicks) as clicks,
-        SUM(cost) as cost,
-        SUM(conversions) as conversions
-      FROM daily_metrics
-      WHERE entity_type = 'campaign'
-        AND date >= date('now', '-30 days')
-      GROUP BY date
-      ORDER BY date
+        dm.date,
+        c.name as campaign,
+        SUM(dm.clicks) as metric_value
+      FROM daily_metrics dm
+      JOIN campaigns c ON dm.entity_id = c.campaign_id
+      WHERE dm.entity_type = 'campaign'
+        AND dm.date >= date('now', '-30 days')
+      GROUP BY dm.date, c.name
+      ORDER BY dm.date
     `;
-
     const trendResult = await env.DB.prepare(trendQuery).all();
     const trend = trendResult.results.map(row => ({
       date: row.date,
-      impressions: row.impressions,
-      clicks: row.clicks,
-      cost: row.cost,
-      conversions: row.conversions,
-      ctr: row.clicks > 0 ? parseFloat((row.clicks / row.impressions * 100).toFixed(2)) : 0,
-      cpc: row.clicks > 0 ? parseFloat((row.cost / row.clicks).toFixed(2)) : 0
+      campaign: row.campaign,
+      metric_value: row.metric_value
     }));
 
-    // Get top keywords
+    // Top keywords: renderTopKeywordsTable reads text/impressions/clicks/cpc/
+    // conversions. Added SUM(conversions) (was missing → conversions column empty).
     const topKeywordsQuery = `
       SELECT
         k.text,
@@ -130,7 +142,8 @@ export async function handleMetrics(request, env) {
         c.name as campaign_name,
         COALESCE(SUM(dm.impressions), 0) as impressions,
         COALESCE(SUM(dm.clicks), 0) as clicks,
-        COALESCE(SUM(dm.cost), 0) as cost
+        COALESCE(SUM(dm.cost), 0) as cost,
+        COALESCE(SUM(dm.conversions), 0) as conversions
       FROM keywords k
       LEFT JOIN daily_metrics dm ON k.keyword_id = dm.entity_id
         AND dm.entity_type = 'keyword'
@@ -139,7 +152,6 @@ export async function handleMetrics(request, env) {
       ORDER BY SUM(dm.clicks) DESC
       LIMIT 10
     `;
-
     const topKeywordsResult = await env.DB.prepare(topKeywordsQuery).all();
     const top_keywords = topKeywordsResult.results.map(keyword => ({
       text: keyword.text,
@@ -148,15 +160,25 @@ export async function handleMetrics(request, env) {
       impressions: keyword.impressions,
       clicks: keyword.clicks,
       cost: keyword.cost,
+      conversions: keyword.conversions,
       ctr: keyword.clicks > 0 ? parseFloat((keyword.clicks / keyword.impressions * 100).toFixed(2)) : 0,
       cpc: keyword.clicks > 0 ? parseFloat((keyword.cost / keyword.clicks).toFixed(2)) : 0
     }));
 
+    // Campaign comparison chart: renderCampaignComparison reads {name, cost,
+    // conversions}. Derived from the same campaigns array (no extra query).
+    const campaign_comparison = campaigns.map(c => ({
+      name: c.name,
+      cost: c.cost,
+      conversions: c.conversions
+    }));
+
     return new Response(JSON.stringify({
+      account,
       campaigns,
-      kpis: accountKPIs,
       trend,
-      top_keywords
+      top_keywords,
+      campaign_comparison
     }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' }
