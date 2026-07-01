@@ -138,11 +138,14 @@ class GoogleAdsMonitor:
             return campaigns
 
         except GoogleAdsException as e:
+            # Re-raise so run_sync() can mark the cycle FAILED. Previously this
+            # returned [] — indistinguishable from a legitimately-empty account,
+            # so an expired token / dead query silently looked like "0 campaigns".
             print(f"[Monitor] Google Ads API error: {e}")
-            return []
+            raise
         except Exception as e:
             print(f"[Monitor] Error getting campaigns from API: {e}")
-            return []
+            raise
 
     def query_metrics(self, days: int = 7) -> List[Dict[str, Any]]:
         """Query campaign metrics from Google Ads API."""
@@ -401,11 +404,21 @@ class GoogleAdsMonitor:
         print("[Monitor] Starting full sync cycle")
 
         try:
-            # Get active campaigns from API
+            # Get active campaigns from API. An empty list here means the query
+            # SUCCEEDED and the account has 0 campaigns (not an error). Real API
+            # failures now raise from get_active_campaigns_from_api → caught by
+            # the except below → marked failed.
             api_campaigns = self.get_active_campaigns_from_api()
             if not api_campaigns:
-                print("[Monitor] No campaigns found or API error")
-                return False
+                print("[Monitor] No active campaigns (query OK) — nothing to sync")
+                status = self.load_sync_status()
+                status['last_sync_at'] = datetime.now().isoformat()
+                status['last_sync_status'] = 'success'
+                status['consecutive_failures'] = 0
+                status['metrics_synced'] = 0
+                status['leads_synced'] = 0
+                self.save_sync_status(status)
+                return True
 
             # Reconcile campaigns
             self.reconcile_campaigns(api_campaigns)
