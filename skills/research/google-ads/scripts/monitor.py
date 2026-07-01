@@ -36,6 +36,16 @@ class GoogleAdsMonitor:
         self.conn = init_campaigns_db(db_path)
         self.sync_status_path = db_path.parent / "sync-status.json"
 
+        # Populate os.environ from google-ads.env BEFORE reading any value.
+        # Fixes M3: customer_id was read before load_google_ads_env() ran, so
+        # under cron (empty shell env, no vars exported) it was always "" →
+        # INVALID_CUSTOMER_ID on every GAQL query. load_from_env (below) reads
+        # post-load so the client itself worked, but self.customer_id didn't.
+        try:
+            load_google_ads_env()
+        except Exception as e:
+            print(f"[Monitor] ⚠️ load_google_ads_env failed: {e}")
+
         # Customer ID to query = the child account (GOOGLE_ADS_CUSTOMER_ID env),
         # NOT login_customer_id (which is the MCC manager). Fixes M2: querying
         # login_customer_id hits the shell MCC account (no campaigns).
@@ -47,7 +57,6 @@ class GoogleAdsMonitor:
         self.googleads_client = None
         if GOOGLE_ADS_AVAILABLE:
             try:
-                load_google_ads_env()  # populate os.environ from google-ads.env
                 self.googleads_client = GoogleAdsClient.load_from_env(version=os.getenv("GOOGLE_ADS_API_VERSION", "v21"))
                 print(f"[Monitor] Google Ads client initialized "
                       f"(customer_id={self.customer_id or 'NOT SET'})")
