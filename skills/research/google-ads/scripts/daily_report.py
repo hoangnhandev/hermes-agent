@@ -12,6 +12,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
 from _env import load_google_ads_env  # self-contained under cron
+from _budget_calc import fmt_vnd
 
 
 class DailyReportGenerator:
@@ -166,12 +167,12 @@ class DailyReportGenerator:
         report += f"Impressions: {summary['total_impressions']:,} | "
         report += f"Clicks: {summary['total_clicks']:,} | "
         report += f"CTR: {summary['overall_ctr']:.1f}% | "
-        report += f"Cost: ${summary['total_cost']:.2f}"
+        report += f"Cost: {fmt_vnd(summary['total_cost'])}"
 
         if summary['total_conversions'] > 0:
             report += f" | Leads: {summary['total_conversions']}"
             if summary['overall_cpl']:
-                report += f" | CPL: ${summary['overall_cpl']:.2f}"
+                report += f" | CPL: {fmt_vnd(summary['overall_cpl'])}"
 
         report += "\n\n"
 
@@ -190,12 +191,12 @@ class DailyReportGenerator:
                 # Lead generation campaign
                 report += f"✅ *{campaign_name}* (leads)\n"
                 report += f"   Clicks: {campaign['clicks']} | CTR: {campaign['ctr']:.1f}% | "
-                report += f"Leads: {campaign['conversions']} | CPL: ${campaign['cpl']:.2f}\n"
+                report += f"Leads: {campaign['conversions']} | CPL: {fmt_vnd(campaign['cpl'])}\n"
             else:
                 # Awareness/traffic campaign
                 report += f"📢 *{campaign_name}* (awareness)\n"
                 report += f"   Impressions: {campaign['impressions']:,} | Clicks: {campaign['clicks']} | "
-                report += f"CTR: {campaign['ctr']:.1f}% | Spend: ${campaign['cost']:.2f}\n"
+                report += f"CTR: {campaign['ctr']:.1f}% | Spend: {fmt_vnd(campaign['cost'])}\n"
 
             # Add pacing info
             daily_budget = campaign.get('daily_budget', 0)
@@ -203,7 +204,7 @@ class DailyReportGenerator:
             # line below uses pacing_pct unconditionally, so it must be defined
             # even when daily_budget==0 (else NameError crashes the daily cron).
             if daily_budget > 0:
-                report += f"   Budget: ${campaign['cost']:.2f}/${daily_budget:.2f} daily ({pacing_pct:.0f}%)\n"
+                report += f"   Budget: {fmt_vnd(campaign['cost'])}/{fmt_vnd(daily_budget)} daily ({pacing_pct:.0f}%)\n"
 
             report += "\n"
 
@@ -223,7 +224,7 @@ class DailyReportGenerator:
             report += "🔑 *Top Keywords*\n"
             for i, keyword in enumerate(keywords, 1):
                 report += f"{i}. *{keyword['keyword']}* ({keyword['match_type']})\n"
-                report += f"   Clicks: {keyword['clicks']} | Conversions: {keyword['conversions']} | CPC: ${keyword['avg_cpc']:.2f}\n"
+                report += f"   Clicks: {keyword['clicks']} | Conversions: {keyword['conversions']} | CPC: {fmt_vnd(keyword['avg_cpc'])}\n"
             report += "\n"
 
         # LLM suggestions

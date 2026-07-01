@@ -20,14 +20,15 @@ import json
 import sqlite3
 from datetime import datetime, date, timedelta
 from pathlib import Path
+from _budget_calc import fmt_vnd
 
 DB_PATH = Path(__file__).parent.parent / "data" / "campaigns-local.db"
 
-# Action thresholds (tunable; automotive-aware defaults)
-WASTED_SPEND_USD = 5.0      # cost >= this with 0 conversions → pause candidate
-SCALE_MIN_CONVERSIONS = 2   # conversions >= this → consider scaling
-CPA_GOOD_USD = 200.0        # CPA below this for a VF3 (~280M VND) → profitable scale
-CVR_DROP_PCT = 20.0         # CVR dropped >20% vs baseline → watch
+# Action thresholds in VND (display currency). USD source: WASTED=$5, CPA=$200.
+WASTED_SPEND_VND = 125_000     # cost ≥ this with 0 conv → pause candidate ($5)
+SCALE_MIN_CONVERSIONS = 2      # conversions ≥ this → consider scaling
+CPA_GOOD_VND = 5_000_000       # CPA below this for a VF3 (~280M VND) → profitable ($200)
+CVR_DROP_PCT = 20.0            # CVR dropped >20% vs baseline → watch
 
 
 def _conn() -> sqlite3.Connection:
@@ -112,7 +113,7 @@ def _wasted_spend(conn: sqlite3.Connection, entity_type: str,
         FROM daily_metrics WHERE entity_type=? AND date>=? AND date<=?
         GROUP BY entity_id HAVING SUM(cost) >= ? AND SUM(conversions) = 0
         ORDER BY SUM(cost) DESC
-    """, (entity_type, start.isoformat(), end.isoformat(), WASTED_SPEND_USD)).fetchall()
+    """, (entity_type, start.isoformat(), end.isoformat(), WASTED_SPEND_VND)).fetchall()
     return [_entity_dict(r) for r in rows]
 
 
@@ -130,13 +131,13 @@ def _recommend(cur: dict, base: dict | None, top: list, wasted: list) -> list:
     # Scale winners
     for e in top:
         if e["conversions"] >= SCALE_MIN_CONVERSIONS and (
-                e["cpa"] is None or e["cpa"] <= CPA_GOOD_USD):
+                e["cpa"] is None or e["cpa"] <= CPA_GOOD_VND):
             actions.append({"action": "SCALE", "entity": e["entity_id"],
-                            "reason": f"{e['conversions']} conv, CPA ${e['cpa']} — tăng bid/budget"})
+                            "reason": f"{e['conversions']} conv, CPA {fmt_vnd(e['cpa'])} — tăng bid/budget"})
     # Pause wasted spend
     for e in wasted:
         actions.append({"action": "PAUSE", "entity": e["entity_id"],
-                        "reason": f"${e['cost']} chi, 0 conv — pause hoặc negative"})
+                        "reason": f"{fmt_vnd(e['cost'])} chi, 0 conv — pause hoặc negative"})
     # CVR trend watch
     if base and cur["clicks"] > 50 and base["cvr"] > 0:
         drop = (base["cvr"] - cur["cvr"]) / base["cvr"] * 100
@@ -218,8 +219,8 @@ def print_report(r: dict) -> None:
     print(f"\n{line}\n📈 OPTIMIZATION REVIEW — {r['entity_type'].upper()} "
           f"({cp['start']} → {cp['end']})\n{line}")
     print(f"\n📊 HIỆU SUẤT KỲ NÀY:")
-    print(f"   Clicks {cp['clicks']} | Cost ${cp['cost']} | Conv {cp['conversions']} | "
-          f"CVR {cp['cvr']*100:.1f}% | CPA {'${}'.format(cp['cpa']) if cp['cpa'] else 'N/A'}")
+    print(f"   Clicks {cp['clicks']} | Cost {fmt_vnd(cp['cost'])} | Conv {cp['conversions']} | "
+          f"CVR {cp['cvr']*100:.1f}% | CPA {fmt_vnd(cp['cpa']) if cp['cpa'] else 'N/A'}")
     if bp:
         print(f"\n📅 VS BASELINE ({bp['start']} → {bp['end']}):")
         if isinstance(d, dict) and "clicks_pct" in d:
@@ -230,11 +231,11 @@ def print_report(r: dict) -> None:
     print(f"\n🏆 TOP PERFORMERS (scale lên):")
     for e in r["top_performers"][:5]:
         print(f"   • {e['entity_id']}: {e['conversions']} conv, "
-              f"${e['cost']} cost, CPA {'${}'.format(e['cpa']) if e['cpa'] else '-'}")
+              f"{fmt_vnd(e['cost'])} cost, CPA {fmt_vnd(e['cpa']) if e['cpa'] else '-'}")
     if r["wasted_spend"]:
         print(f"\n🗑️ WASTED SPEND (pause/negative):")
         for e in r["wasted_spend"][:5]:
-            print(f"   • {e['entity_id']}: ${e['cost']} chi, 0 conv")
+            print(f"   • {e['entity_id']}: {fmt_vnd(e['cost'])} chi, 0 conv")
     print(f"\n🎯 KẾ HOẠCH TỐI ƯU THÁNG SAU:")
     for a in r["recommendations"]:
         print(f"   [{a['action']}] {a['entity']} — {a['reason']}")

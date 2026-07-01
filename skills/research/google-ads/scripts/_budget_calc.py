@@ -10,6 +10,7 @@ Rates are industry averages; real results vary by model/geo/copy/landing page.
 """
 from __future__ import annotations
 import math
+import os
 from dataclasses import dataclass, field
 
 # ── Industry benchmarks (automotive) ───────────────────────────────────────
@@ -26,6 +27,55 @@ TESTDRIVE_TO_SALE = 0.10       # lead (test-drive) → vehicle sale close rate
 # (industry test-drive close rate ~5-20%; 10% is a conservative mid estimate)
 
 VND_PER_USD = 25_000           # approx FX for VND ↔ USD display
+
+# VND equivalents of the USD benchmarks (= _USD × VND_PER_USD). VND is the
+# skill's display + comparison currency everywhere a user sees a number; the
+# _USD originals stay as the source-of-truth benchmarks (WordStream/LocaliQ).
+AUTOMOTIVE_CPC_VND = round(AUTOMOTIVE_CPC_USD * VND_PER_USD)        # ~60,250
+VN_AUTOMOTIVE_CPC_VND = round(VN_AUTOMOTIVE_CPC_USD * VND_PER_USD)  # ~12,500
+MARKET_CPC_VND = {"vn": VN_AUTOMOTIVE_CPC_VND, "global": AUTOMOTIVE_CPC_VND}
+
+
+# ── Currency conversion (VND ↔ Google Ads API micros) ───────────────────────
+def account_currency() -> str:
+    """Google Ads account billing currency (env override). Default VND.
+
+    Why: API amount_micros are denominated in the account currency. A VN
+    account bills in VND (default). Set ACCOUNT_CURRENCY=USD only if the real
+    account bills in USD — the helpers below then convert VND↔USD at the API
+    boundary so the rest of the pipeline stays in VND.
+    """
+    return os.getenv("ACCOUNT_CURRENCY", "VND").strip().upper()
+
+
+def to_micros_from_vnd(vnd: float) -> int:
+    """VND amount → Google Ads API micros, honoring ACCOUNT_CURRENCY.
+
+    VND account: micros = vnd × 1e6 (1 micro = 1e-6 of the account unit).
+    USD account: convert vnd→USD first (vnd / VND_PER_USD), then × 1e6.
+    """
+    acct = vnd if account_currency() != "USD" else vnd / VND_PER_USD
+    return int(round(acct * 1_000_000))
+
+
+def from_micros(micros: int) -> float:
+    """Google Ads API micros → VND (display currency).
+
+    API micros are in the account currency; a USD account's micros are scaled
+    to USD so multiply by VND_PER_USD to return VND for display.
+    """
+    acct = micros / 1_000_000.0
+    return acct * VND_PER_USD if account_currency() == "USD" else acct
+
+
+def fmt_vnd(amount) -> str:
+    """Format a VND amount for display: '12.500.000₫' (vi-VN grouping, no
+    decimals — VND has no subdivision). None/NaN → '0₫'."""
+    try:
+        n = int(round(float(amount or 0)))
+    except (TypeError, ValueError):
+        n = 0
+    return f"{n:,}₫".replace(",", ".")
 
 
 def market_cpc(market: str) -> tuple[float, str]:
@@ -115,10 +165,12 @@ class Projection:
     budget_vnd: int
     budget_usd: float
     daily_budget_usd: float
+    daily_budget_vnd: int         # daily in VND (display currency)
     clicks_per_month: float
     leads_per_month: float        # test-drive bookings
     sales_per_month: float        # estimated vehicle sales
-    cpl_usd: float                # cost per lead
+    cpl_usd: float                # cost per lead (USD benchmark)
+    cpl_vnd: int                  # cost per lead in VND (display)
     cpa_usd: float | None         # cost per acquisition (sale); None if sales==0
     months_to_smart_bidding: float | None  # None if leads==0 (never reaches threshold)
 
@@ -143,19 +195,23 @@ def project(budget_vnd: int, cpc_usd: float = AUTOMOTIVE_CPC_USD,
         raise ValueError(f"lead_to_sale must be in (0, 1], got {lead_to_sale}")
     budget_usd = budget_vnd / VND_PER_USD
     daily_usd = budget_usd / 30
+    daily_vnd = round(budget_vnd / 30) if budget_vnd > 0 else 0
     clicks = budget_usd / cpc_usd                 # total clicks/month
     leads = clicks * cvr                          # test-drive bookings
     sales = leads * lead_to_sale                  # vehicle sales
     cpl = budget_usd / leads if leads > 0 else 0.0
+    cpl_vnd_val = round(budget_vnd / leads) if leads > 0 else 0
     cpa = budget_usd / sales if sales > 0 else float("inf")
     months_to_sb = SMART_BIDDING_MIN_CONVERSIONS / leads if leads > 0 else float("inf")
     return Projection(
         budget_vnd=budget_vnd, budget_usd=round(budget_usd, 2),
         daily_budget_usd=round(daily_usd, 2),
+        daily_budget_vnd=daily_vnd,
         clicks_per_month=round(clicks, 1),
         leads_per_month=round(leads, 1),
         sales_per_month=round(sales, 2),
-        cpl_usd=round(cpl, 2), cpa_usd=round(cpa, 2) if cpa != float("inf") else None,
+        cpl_usd=round(cpl, 2), cpl_vnd=cpl_vnd_val,
+        cpa_usd=round(cpa, 2) if cpa != float("inf") else None,
         months_to_smart_bidding=round(months_to_sb, 1) if months_to_sb != float("inf") else None,
     )
 

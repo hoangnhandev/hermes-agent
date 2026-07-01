@@ -20,7 +20,7 @@ from pathlib import Path
 
 from _budget_calc import (
     project, budget_tier, assess_goal, model_info, market_cpc,
-    VINFAST_MODELS, VN_AUTOMOTIVE_CPC_USD,
+    VINFAST_MODELS, VN_AUTOMOTIVE_CPC_USD, VND_PER_USD,
 )
 
 # ── Keyword seeds (Vietnam, VF-focused). Full taxonomy in references/. ─────
@@ -68,14 +68,15 @@ def build_strategy(budget_vnd: int, model_slug: str, market: str,
                   "segment": m.segment, "competitors": m.competitors,
                   "positioning": m.positioning, "budget_fit": m.budget_fit},
         "budget": {"monthly_vnd": budget_vnd, "monthly_usd": proj.budget_usd,
-                   "daily_usd": proj.daily_budget_usd, "tier": tier_key,
-                   "tier_label": tier_label, "tier_note": tier_note,
-                   "cpc_usd_used": cpc_usd, "cpc_source": cpc_note},
+                   "daily_usd": proj.daily_budget_usd, "daily_vnd": proj.daily_budget_vnd,
+                   "tier": tier_key, "tier_label": tier_label, "tier_note": tier_note,
+                   "cpc_usd_used": cpc_usd, "cpc_vnd_used": round(cpc_usd * VND_PER_USD),
+                   "cpc_source": cpc_note},
         "projection": {
             "clicks_per_month": proj.clicks_per_month,
             "leads_per_month": proj.leads_per_month,
             "sales_per_month": proj.sales_per_month,
-            "cpl_usd": proj.cpl_usd, "cpa_usd": proj.cpa_usd,
+            "cpl_usd": proj.cpl_usd, "cpl_vnd": proj.cpl_vnd, "cpa_usd": proj.cpa_usd,
             "months_to_smart_bidding": proj.months_to_smart_bidding,
         },
         "keyword_seeds": get_keyword_seeds(model_slug),
@@ -98,19 +99,22 @@ def print_strategy(s: dict) -> None:
     print(f"📌 Model: {m['name']} — {m['segment']}")
     print(f"   Giá ~{m['price_vnd']:,} VND | Cạnh tranh: {', '.join(m['competitors'])}")
     print(f"   {m['positioning']}")
-    print(f"\n💰 Budget: {b['monthly_vnd']:,} VND/tháng (~${b['monthly_usd']:,.0f} USD, "
-          f"${b['daily_usd']:.2f}/ngày)")
+    print(f"\n💰 Budget: {b['monthly_vnd']:,} VND/tháng "
+          f"(~{b['daily_vnd']:,} VND/ngày)")
     print(f"   Tier: {b['tier_label']} — {b['tier_note']}")
-    print(f"\n📊 DỰ KIẾN (CPC {b.get('cpc_usd_used', VN_AUTOMOTIVE_CPC_USD)} — "
+    cpc_vnd = b.get('cpc_vnd_used', round(VN_AUTOMOTIVE_CPC_USD * VND_PER_USD))
+    cpc_usd = b.get('cpc_usd_used', VN_AUTOMOTIVE_CPC_USD)
+    print(f"\n📊 DỰ KIẾN (CPC ~{cpc_vnd:,} VND / ${cpc_usd} — "
           f"{b.get('cpc_source','')}, CVR 7.76%, lead→sale 10%):")
     print(f"   ⚠️ Sales/CPA = UPPER BOUND (CVR & lead→sale là benchmark global;")
     print(f"      thị trường VN thực tế có thể thấp hơn — chưa có data VN-specific).")
     print(f"   • Clicks/tháng:     {p['clicks_per_month']:.0f}")
     print(f"   • Leads (lái thử): {p['leads_per_month']:.1f}")
     print(f"   • Sales (xe):      {p['sales_per_month']:.2f}")
-    print(f"   • Cost/lead:       ${p['cpl_usd']:.2f}")
+    print(f"   • Cost/lead:       {p['cpl_vnd']:,} VND (~${p['cpl_usd']:.2f})")
     cpa = p['cpa_usd']
-    print(f"   • Cost/sale (CPA): {'${:,.0f}'.format(cpa) if cpa else 'N/A (budget quá thấp)'}")
+    cpa_vnd = round(cpa * VND_PER_USD) if cpa else None
+    print(f"   • Cost/sale (CPA): {f'{cpa_vnd:,} VND (~${cpa:,.0f})' if cpa else 'N/A (budget quá thấp)'}")
     sb = p['months_to_smart_bidding']
     print(f"   • Smart bidding sau: {sb} tháng" if sb else
           "   • Smart bidding: KHÔNG reach (budget quá thấp)")

@@ -19,9 +19,10 @@ from approval_gate import write_pending, read_pending, mark_status, approval_loc
 
 MAX_DAILY_MULTIPLIER = 2
 BATCH_SIZE = 10
-# Account monthly spend cap (env override; default $500). Used by guardrail so
-# the cap is a real ceiling, not derived from the proposed campaign itself.
-ACCOUNT_MONTHLY_CAP = float(os.getenv("MONTHLY_BUDGET", "500"))
+# Account monthly spend cap in VND (env override; default 6,000,000).
+# VND is the skill's currency everywhere a user sees a number. Used by the
+# guardrail so the cap is a real ceiling, not derived from the proposed campaign.
+ACCOUNT_MONTHLY_CAP = float(os.getenv("MONTHLY_BUDGET", "6000000"))
 
 
 def generate_ad_copy(plan: Dict[str, Any], niche: str) -> List[Dict[str, Any]]:
@@ -88,23 +89,19 @@ def run_budget_guardrails(db: sqlite3.Connection, daily_budget: float) -> bool:
     fixed ACCOUNT_MONTHLY_CAP (env MONTHLY_BUDGET) and we compare existing +
     proposed against it (proposed excluded from the cap derivation).
     """
-    print(f"[BUDGET] Checking guardrails: daily ${daily_budget:.2f} "
-          f"(account cap ${ACCOUNT_MONTHLY_CAP:.0f}/mo)")
-    if ACCOUNT_MONTHLY_CAP > 100000:
-        print(f"⚠️ MONTHLY_BUDGET=${ACCOUNT_MONTHLY_CAP:,.0f}/mo > $100k — looks like "
-              f"VND accidentally written as USD. Guardrail may be decorative. "
-              f"MONTHLY_BUDGET is in USD (e.g. 500), NOT VND.")
+    print(f"[BUDGET] Checking guardrails: daily {daily_budget:,.0f} VND "
+          f"(account cap {ACCOUNT_MONTHLY_CAP:,.0f} VND/mo)")
     existing_monthly = get_total_monthly_budget(db)        # EXISTING campaigns only
     proposed_monthly = existing_monthly + (daily_budget * 30)
     if proposed_monthly > ACCOUNT_MONTHLY_CAP:
         print(f"⚠️ BUDGET GUARD: account cap exceeded")
-        print(f"   Existing ${existing_monthly:.0f}/mo + proposed "
-              f"${daily_budget*30:.0f}/mo = ${proposed_monthly:.0f}/mo")
-        print(f"   Cap ${ACCOUNT_MONTHLY_CAP:.0f}/mo (MONTHLY_BUDGET env)")
+        print(f"   Existing {existing_monthly:,.0f} VND/mo + proposed "
+              f"{daily_budget*30:,.0f} VND/mo = {proposed_monthly:,.0f} VND/mo")
+        print(f"   Cap {ACCOUNT_MONTHLY_CAP:,.0f} VND/mo (MONTHLY_BUDGET env)")
         print(f"   → Reduce daily budget or pause another campaign.")
         return False
-    print(f"[BUDGET] OK — projected ${proposed_monthly:.0f}/mo ≤ "
-          f"cap ${ACCOUNT_MONTHLY_CAP:.0f}/mo")
+    print(f"[BUDGET] OK — projected {proposed_monthly:,.0f} VND/mo ≤ "
+          f"cap {ACCOUNT_MONTHLY_CAP:,.0f} VND/mo")
     return True
 
 
@@ -201,14 +198,15 @@ def _research_to_deploy_plan(research_plan: Dict[str, Any]) -> Dict[str, Any]:
     seeds = research_plan.get("keyword_seeds", {})
     keywords = [{"keyword": k} for cat in ("branded", "non_branded", "intent")
                 for k in seeds.get(cat, [])]
-    daily = budget.get("daily_usd") or round((budget.get("monthly_usd", 0) or 0) / 30, 2)
-    # VN-aware CPC: research.py sets budget.cpc_usd_used per market (VN ~0.50).
-    # Using it for the ad-group bid avoids bidding the US $2.41 on a VN account.
-    cpc = budget.get("cpc_usd_used", 2.41)
+    # VND is the pipeline currency. research.py emits daily_vnd + cpc_vnd_used;
+    # fall back to deriving from monthly_vnd for older plan files.
+    daily = budget.get("daily_vnd") or round((budget.get("monthly_vnd", 0) or 0) / 30)
+    # VN-aware CPC in VND: research.py sets cpc_vnd_used per market (VN ~12,500).
+    cpc = budget.get("cpc_vnd_used", 12500)
     return {
         "niche": model.get("name", "vinfast"),
         "location": {"vn": "Vietnam"}.get(research_plan.get("market", "vn"), "Vietnam"),
-        "budget_plan": {"daily_budget": daily, "estimated_cpc_range": [cpc, round(cpc * 1.4, 2)]},
+        "budget_plan": {"daily_budget": daily, "estimated_cpc_range": [cpc, round(cpc * 1.4)]},
         "keywords": keywords,
     }
 
@@ -259,11 +257,9 @@ def cmd_create(args) -> int:
     # written by monitor after each deploy). The old ad-copy-learning.db never
     # received campaign rows → cap always saw $0 existing → decorative (C1 fix).
     db = init_db(script_dir.parent / "data" / "campaigns-local.db")
-    monthly_budget = args.budget or plan.get("budget", {}).get("monthly_vnd", 500)
-    # plan from research.py stores VND; convert to USD for the legacy deploy path
-    if monthly_budget > 100000:  # heuristic: VND values are large
-        monthly_budget = round(monthly_budget / 25000)
-    daily_budget = round(monthly_budget / 30, 2)
+    # VND everywhere: --budget and plan.monthly_vnd are both VND (no conversion).
+    monthly_budget = args.budget or plan.get("budget", {}).get("monthly_vnd", 6000000)
+    daily_budget = round(monthly_budget / 30)
 
     niche = plan.get("model", {}).get("name") or plan.get("niche") or args.niche or "vinfast"
     gs = _generate_and_screen(plan, niche, db, daily_budget)
@@ -322,7 +318,7 @@ def cmd_approve(uuid_: str, indices_str: str, mock: bool) -> int:
         guard_db = init_db(Path(__file__).parent.parent / "data" / "campaigns-local.db")
         if not run_budget_guardrails(guard_db, daily):
             msg = ("Budget cap exceeded at approve time — deploy blocked. "
-                   "Pause another campaign or raise MONTHLY_BUDGET (USD).")
+                   "Pause another campaign or raise MONTHLY_BUDGET (VND).")
             print(f"❌ {msg}")
             send_deploy_result(uuid_, False, msg)
             return 1
@@ -385,7 +381,7 @@ def cmd_reject(uuid_: str) -> int:
 def main():
     parser = argparse.ArgumentParser(description="Google Ads Campaign Creator (async approval)")
     parser.add_argument("--plan", type=str, help="Research strategy JSON (create mode)")
-    parser.add_argument("--budget", type=int, help="Override monthly budget USD (create mode)")
+    parser.add_argument("--budget", type=int, help="Override monthly budget VND (create mode)")
     parser.add_argument("--niche", type=str, help="Target niche (create mode)")
     parser.add_argument("--location", type=str, default="United States", help="Location")
     parser.add_argument("--mock", action="store_true",

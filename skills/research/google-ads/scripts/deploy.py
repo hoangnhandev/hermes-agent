@@ -16,6 +16,7 @@ except ImportError:
     GoogleAdsClient = None
     GoogleAdsException = Exception  # broad fallback; mock path returns early
 from _env import load_google_ads_env
+from _budget_calc import to_micros_from_vnd, from_micros
 
 BATCH_SIZE = 10
 
@@ -68,7 +69,8 @@ def create_campaign(client: GoogleAdsClient, customer_id: str, name: str, daily_
         client: Google Ads client
         customer_id: Google Ads customer ID
         name: Campaign name
-        daily_budget_micros: Daily budget in micros (1 micro = 0.000001 USD)
+        daily_budget_micros: Daily budget in micros (1 micro = 1e-6 of the
+            account-currency unit; VND by default — see ACCOUNT_CURRENCY)
 
     Returns:
         Campaign resource name or None if failed
@@ -76,7 +78,8 @@ def create_campaign(client: GoogleAdsClient, customer_id: str, name: str, daily_
     print(f"[CAMPAIGN] Creating campaign: {name}")
 
     if isinstance(client, MockGoogleAdsClient):
-        print(f"[CAMPAIGN] Mock: Would create campaign '{name}' with budget ${daily_budget_micros / 1000000}")
+        print(f"[CAMPAIGN] Mock: Would create campaign '{name}' with budget "
+              f"{from_micros(daily_budget_micros):,.0f} VND")
         return f"customers/{customer_id}/campaigns/mock-campaign-123"
 
     try:
@@ -137,7 +140,8 @@ def create_ad_group(client: GoogleAdsClient, customer_id: str, campaign_resource
     print(f"[ADGROUP] Creating ad group: {name}")
 
     if isinstance(client, MockGoogleAdsClient):
-        print(f"[ADGROUP] Mock: Would create ad group '{name}' with CPC ${cpc_bid_micros / 1000000}")
+        print(f"[ADGROUP] Mock: Would create ad group '{name}' with CPC "
+              f"{from_micros(cpc_bid_micros):,.0f} VND")
         return f"customers/{customer_id}/adGroups/mock-adgroup-123"
 
     try:
@@ -364,7 +368,7 @@ def deploy_full_campaign(client: GoogleAdsClient, customer_id: str, plan: Dict[s
     print(f"[DEPLOY] Starting full campaign deployment")
 
     campaign_name = f"{plan['niche']} - {plan['location']}"
-    daily_budget_micros = int(plan['budget_plan']['daily_budget'] * 1000000)
+    daily_budget_micros = to_micros_from_vnd(plan['budget_plan']['daily_budget'])
 
     # M1 guard: block example.com landing URL on a REAL client (mock OK).
     final_url = os.getenv("GOOGLE_ADS_FINAL_URL", "https://example.com")
@@ -392,7 +396,7 @@ def deploy_full_campaign(client: GoogleAdsClient, customer_id: str, plan: Dict[s
 
     # Create ad group
     ad_group_name = f"{campaign_name} - Main"
-    cpc_bid_micros = int(plan['budget_plan']['estimated_cpc_range'][0] * 1000000)  # Use lower estimate
+    cpc_bid_micros = to_micros_from_vnd(plan['budget_plan']['estimated_cpc_range'][0])  # lower estimate
 
     ad_group_resource_name = retry_with_backoff(
         lambda: create_ad_group(client, customer_id, campaign_resource_name, ad_group_name, cpc_bid_micros)

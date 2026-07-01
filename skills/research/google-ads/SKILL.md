@@ -129,6 +129,26 @@ Outputs are saved to `data/strategy-{model-slug}-{YYYY-MM-DD}.json` (e.g. `strat
 - Account total: all active campaigns' daily budgets must not exceed `total_monthly_budget / 30 * 2`
 - Hardcoded in code — cannot be overridden by LLM
 - Creation blocked if guardrails violated
+- All budgets in **VND** (see Currency below)
+
+### Currency (VND)
+
+**VND is the skill's currency everywhere a user sees a number** — CLI `--budget`,
+the `MONTHLY_BUDGET` env cap, local SQLite + D1 columns, guardrail comparisons,
+and Telegram/dashboard display. Industry CPC/CPA benchmarks originate in USD
+(WordStream/LocaliQ); shown as VND with the USD source in parentheses.
+
+| Layer | Unit | Note |
+|-------|------|------|
+| `research.py --budget` | VND | e.g. `10000000` = 10 triệu |
+| `MONTHLY_BUDGET` env (account cap) | VND | default `6000000` |
+| Local SQLite + Cloudflare D1 | VND | budgets, cost, conversion_value, cpc_bid |
+| Telegram report + dashboard | VND | `fmt_vnd` → `12.500.000₫` |
+| CPC/CPA benchmarks | USD source → VND | `VN_AUTOMOTIVE_CPC_VND = 12,500` |
+| Google Ads API `amount_micros` | account currency | `ACCOUNT_CURRENCY` env (default `VND`); set `USD` if the real account bills in USD |
+
+Conversion helpers in `scripts/_budget_calc.py`: `to_micros_from_vnd`, `from_micros`,
+`fmt_vnd`, `VND_PER_USD = 25,000`.
 
 ### Policy Screening
 
@@ -428,9 +448,10 @@ you know exactly what does NOT work yet:
 - **Negative keywords are NOT applied at deploy**: research emits a negative
   list (`vf3 cũ`, `review vf3`, …) but `deploy.py` bids on positive keywords
   only. Negatives will be wired as campaign/ad-group criteria in a future phase.
-- **Currency is assumed USD**: budgets/cost use USD micros (`amount_micros`).
-  At go-live, confirm the account's `currency_code` — if VND-billed, amounts
-  need a conversion factor.
+- **Confirm `ACCOUNT_CURRENCY` at go-live**: the pipeline is VND end-to-end;
+  `amount_micros` sent to the API honor `ACCOUNT_CURRENCY` (default `VND`). If
+  the real Google Ads account bills in USD, set `ACCOUNT_CURRENCY=USD` so VND is
+  converted to USD micros at the API boundary.
 - **Date math is UTC**: GAQL `segments.date` is account-local. If the account
   `time_zone` ≠ UTC (VN is UTC+7), daily-report day boundaries shift by the
   offset. Confirm/adjust at go-live.

@@ -24,6 +24,7 @@ except ImportError:
 
 from _store import init_campaigns_db, upsert_metric, save_anomaly, get_campaign_baseline_metrics
 from _env import load_google_ads_env
+from _budget_calc import from_micros
 
 
 class GoogleAdsMonitor:
@@ -115,7 +116,7 @@ class GoogleAdsMonitor:
                     "channel_type": campaign.advertising_channel_type,
                     "bidding_strategy": campaign.bidding_strategy_type,
                     "daily_budget_micros": campaign.daily_budget_micros,
-                    "daily_budget": campaign.daily_budget_micros / 1000000.0 if campaign.daily_budget_micros else 0.0,
+                    "daily_budget": from_micros(campaign.daily_budget_micros) if campaign.daily_budget_micros else 0.0,
                     "start_date": campaign.start_date,
                     "end_date": campaign.end_date
                 })
@@ -171,7 +172,7 @@ class GoogleAdsMonitor:
                     "impressions": metrics_row.impressions,
                     "clicks": metrics_row.clicks,
                     "cost_micros": metrics_row.cost_micros,
-                    "cost": metrics_row.cost_micros / 1000000.0 if metrics_row.cost_micros else 0.0,
+                    "cost": from_micros(metrics_row.cost_micros) if metrics_row.cost_micros else 0.0,
                     "conversions": metrics_row.conversions,
                     "conversion_value": metrics_row.conversions_value
                 })

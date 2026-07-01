@@ -52,8 +52,8 @@ def create_tables(conn: sqlite3.Connection):
             campaign_id TEXT NOT NULL UNIQUE,
             niche TEXT NOT NULL,
             location TEXT NOT NULL,
-            monthly_budget REAL NOT NULL,
-            daily_budget REAL NOT NULL,
+            monthly_budget REAL NOT NULL,  -- unit: VND
+            daily_budget REAL NOT NULL,    -- unit: VND
             status TEXT NOT NULL DEFAULT 'active',
             objective TEXT DEFAULT 'leads',
             has_conversion_tracking INTEGER DEFAULT 0,
@@ -253,7 +253,7 @@ def get_total_existing_daily_budget(conn: sqlite3.Connection) -> float:
     result = cursor.fetchone()
     total = result[0] if result[0] else 0.0
 
-    print(f"[DB] Total existing daily budget: ${total}")
+    print(f"[DB] Total existing daily budget: {total:,.0f} VND")
     return total
 
 
@@ -273,7 +273,7 @@ def get_total_monthly_budget(conn: sqlite3.Connection) -> float:
     result = cursor.fetchone()
     total = result[0] if result[0] else 0.0
 
-    print(f"[DB] Total existing monthly budget: ${total}")
+    print(f"[DB] Total existing monthly budget: {total:,.0f} VND")
     return total
 
 
