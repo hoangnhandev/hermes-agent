@@ -76,7 +76,7 @@ function renderLeads(data) {
   setKpi('leads-today', formatNumber(data.today || 0));
   setKpi('leads-week', formatNumber(data.week || 0));
   setKpi('leads-alltime', formatNumber(data.all_time || 0));
-  setKpi('leads-quality', (data.avg_quality || 0).toFixed(2));
+  setKpi('leads-quality', formatPercent(data.conv_rate || 0));
 
   const deltas = data.deltas || {};
   ['today', 'week', 'alltime', 'quality'].forEach((k) => {

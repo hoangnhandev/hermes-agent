@@ -164,18 +164,23 @@ export async function handleLeads(request, env) {
     `).all();
     const week = weekResult.results[0]?.n || 0;
 
-    // avg_quality: PROXY — the leads table has no quality score. Use the
-    // fraction of leads with a non-zero conversion_value (a 0-1 value-bearing
-    // ratio). Replace with a real leads.quality column when one exists.
-    const avg_quality = totalLeads > 0
-      ? leads.filter(l => (l.conversion_value || 0) > 0).length / totalLeads
-      : 0;
+    // Conv. rate = leads / clicks — a real lead-gen quality signal computable
+    // from existing data (no fabricated "quality score"). Clicks summed across
+    // campaigns with conversion tracking (same scope as the leads).
+    const clicksResult = await env.DB.prepare(`
+      SELECT COALESCE(SUM(dm.clicks), 0) as clicks
+      FROM daily_metrics dm
+      WHERE dm.entity_type = 'campaign'
+        AND dm.entity_id IN (SELECT campaign_id FROM campaigns WHERE has_conversion_tracking = 1)
+    `).all();
+    const totalClicks = clicksResult.results[0]?.clicks || 0;
+    const conv_rate = totalClicks > 0 ? totalLeads / totalClicks : 0;
 
     return new Response(JSON.stringify({
       today,
       week,
       all_time: totalLeads,
-      avg_quality: parseFloat(avg_quality.toFixed(2)),
+      conv_rate: parseFloat(conv_rate.toFixed(4)),
       trend,
       sources: source_breakdown
     }), {

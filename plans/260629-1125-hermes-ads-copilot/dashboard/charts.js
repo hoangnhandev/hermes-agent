@@ -120,7 +120,7 @@ function renderPerformanceTrend(trend) {
     options: baseChartOptions({
       scales: {
         x: { grid: { color: getChartTheme().grid }, ticks: { color: getChartTheme().text }, title: { display: true, text: 'Date', color: getChartTheme().textStrong } },
-        y: { grid: { color: getChartTheme().grid }, ticks: { color: getChartTheme().text }, title: { display: true, text: 'Value', color: getChartTheme().textStrong } },
+        y: { grid: { color: getChartTheme().grid }, ticks: { color: getChartTheme().text }, title: { display: true, text: 'Clicks', color: getChartTheme().textStrong } },
       },
     }),
   });
