@@ -95,6 +95,11 @@ class GoogleAdsMonitor:
             return []
 
         try:
+            # NOTE: campaign.daily_budget_micros does NOT exist in v21+ (budget
+            # lives on the campaign_budget resource, not campaign). Selecting it
+            # → UNRECOGNIZED_FIELD → whole query fails → 0 campaigns every sync.
+            # TODO (when real campaigns exist): JOIN campaign_budget.amount_micros
+            # for accurate budget. Until then daily_budget falls back to 0 in DB.
             gaql_query = """
             SELECT
               campaign.id,
@@ -102,7 +107,6 @@ class GoogleAdsMonitor:
               campaign.status,
               campaign.advertising_channel_type,
               campaign.bidding_strategy_type,
-              campaign.daily_budget_micros,
               campaign.start_date,
               campaign.end_date
             FROM campaign
