@@ -23,7 +23,7 @@ class D1Sync:
     def __init__(self, db_path: Path):
         """Initialize D1 sync with database path."""
         self.db_path = db_path
-        self.sync_url = os.getenv("WORKERS_API_URL", "https://ads-copilot-api.subdomain.workers.dev/api/sync")
+        self.sync_url = os.getenv("WORKERS_API_URL", "https://ads-copilot.withly.org/api/sync")
         self.hermes_secret = os.getenv("HERMES_SYNC_SECRET")
         self.max_retries = 3
         self.backoff_base = 5

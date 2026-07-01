@@ -42,6 +42,14 @@ export default {
       );
     }
 
+    // Machine-to-machine sync: authenticates via X-Hermes-Secret header
+    // (checked inside handleSync), NOT the dashboard cookie. MUST bypass
+    // verifyAuth — otherwise every sync gets 401'd at the cookie gate before
+    // the secret is ever read, and the monitor→D1 pipeline never works.
+    if (pathname === '/api/sync' && request.method === 'POST') {
+      return handleSync(request, env);
+    }
+
     // Apply auth middleware to all other routes
     const authResult = await verifyAuth(request, env);
     if (!authResult.authenticated) {
