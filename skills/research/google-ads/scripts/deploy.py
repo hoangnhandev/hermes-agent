@@ -45,7 +45,7 @@ def get_client(env_file: str = "google-ads.env", allow_mock: bool = False) -> Go
 
     try:
         load_google_ads_env(env_file)  # populate os.environ from google-ads.env
-        client = GoogleAdsClient.load_from_env(version="v17")
+        client = GoogleAdsClient.load_from_env(version=os.getenv("GOOGLE_ADS_API_VERSION", "v21"))
         print("[CLIENT] Google Ads client loaded successfully")
         return client
     except Exception as e:

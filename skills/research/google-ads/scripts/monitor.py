@@ -48,7 +48,7 @@ class GoogleAdsMonitor:
         if GOOGLE_ADS_AVAILABLE:
             try:
                 load_google_ads_env()  # populate os.environ from google-ads.env
-                self.googleads_client = GoogleAdsClient.load_from_env(version="v17")
+                self.googleads_client = GoogleAdsClient.load_from_env(version=os.getenv("GOOGLE_ADS_API_VERSION", "v21"))
                 print(f"[Monitor] Google Ads client initialized "
                       f"(customer_id={self.customer_id or 'NOT SET'})")
                 if not self.customer_id:
