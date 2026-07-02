@@ -116,7 +116,9 @@ def create_campaign(client: GoogleAdsClient, customer_id: str, name: str, daily_
         # campaign_bidding_strategy oneof; accessing manual_cpc.enhanced_cpc_enabled
         # auto-instantiates the inline object and satisfies the oneof.
         campaign.bidding_strategy_type = client.enums.BiddingStrategyTypeEnum.MANUAL_CPC
-        campaign.manual_cpc.enhanced_cpc_enabled = True
+        # enhanced_cpc (eCPC) is not permitted on new/test accounts
+        # (OPERATION_NOT_PERMITTED_FOR_CONTEXT); keep plain Manual CPC.
+        campaign.manual_cpc.enhanced_cpc_enabled = False
         campaign.campaign_budget = budget_resource_name
         # EU political-advertising transparency is a required enum field in
         # current API versions (EuPoliticalAdvertisingStatus, NOT a bool).
