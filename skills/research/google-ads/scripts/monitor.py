@@ -243,7 +243,9 @@ class GoogleAdsMonitor:
             return []
 
         try:
-            date_range = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+            today = datetime.now(timezone.utc)
+            date_range = (today - timedelta(days=days)).strftime("%Y-%m-%d")
+            today_str = today.strftime("%Y-%m-%d")
 
             gaql_query = f"""
             SELECT
@@ -256,7 +258,7 @@ class GoogleAdsMonitor:
               metrics.impressions, metrics.clicks, metrics.cost_micros,
               metrics.conversions, metrics.conversions_value
             FROM keyword_view
-            WHERE segments.date >= '{date_range}'
+            WHERE segments.date >= '{date_range}' AND segments.date <= '{today_str}'
               AND campaign.status = 'ENABLED'
               AND ad_group_criterion.status = 'ENABLED'
             ORDER BY segments.date DESC, campaign.id
