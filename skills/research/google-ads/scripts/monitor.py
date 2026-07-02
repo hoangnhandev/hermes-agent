@@ -104,11 +104,10 @@ class GoogleAdsMonitor:
             return []
 
         try:
-            # NOTE: campaign.daily_budget_micros does NOT exist in v21+ (budget
-            # lives on the campaign_budget resource, not campaign). Selecting it
-            # → UNRECOGNIZED_FIELD → whole query fails → 0 campaigns every sync.
-            # TODO (when real campaigns exist): JOIN campaign_budget.amount_micros
-            # for accurate budget. Until then daily_budget falls back to 0 in DB.
+            # v21: Campaign has no daily_budget_micros field (budget lives on the
+            # campaign_budget resource). Select campaign_budget.amount_micros (a
+            # linked resource, selectable from a campaign query) and read it from
+            # row.campaign_budget below; falls back to 0 if unset.
             gaql_query = """
             SELECT
               campaign.id,
@@ -117,7 +116,8 @@ class GoogleAdsMonitor:
               campaign.advertising_channel_type,
               campaign.bidding_strategy_type,
               campaign.start_date,
-              campaign.end_date
+              campaign.end_date,
+              campaign_budget.amount_micros
             FROM campaign
             WHERE campaign.status = 'ENABLED'
             ORDER BY campaign.name
@@ -131,14 +131,18 @@ class GoogleAdsMonitor:
             campaigns = []
             for row in query_response:
                 campaign = row.campaign
+                # v21: budget lives on the linked campaign_budget resource (not
+                # on Campaign). Read amount_micros from the row's budget field.
+                budget_micros = getattr(getattr(row, "campaign_budget", None),
+                                        "amount_micros", 0) or 0
                 campaigns.append({
                     "campaign_id": str(campaign.id),
                     "name": campaign.name,
                     "status": campaign.status,
                     "channel_type": campaign.advertising_channel_type,
                     "bidding_strategy": campaign.bidding_strategy_type,
-                    "daily_budget_micros": campaign.daily_budget_micros,
-                    "daily_budget": from_micros(campaign.daily_budget_micros) if campaign.daily_budget_micros else 0.0,
+                    "daily_budget_micros": budget_micros,
+                    "daily_budget": from_micros(budget_micros) if budget_micros else 0.0,
                     "start_date": campaign.start_date,
                     "end_date": campaign.end_date
                 })
