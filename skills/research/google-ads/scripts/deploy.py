@@ -337,8 +337,9 @@ def create_ads(client: GoogleAdsClient, customer_id: str, ad_group_resource_name
                 asset.text = description
                 responsive_ad.descriptions.append(asset)
 
-            # Set final URLs and paths
-            responsive_ad.final_urls.extend([final_url])
+            # final_urls lives on the Ad message (ad.ad), NOT on
+            # ResponsiveSearchAdInfo (which has only headlines/descriptions/paths).
+            ad.ad.final_urls.extend([final_url])
             if ad_data.get("path1"):
                 responsive_ad.path1 = ad_data["path1"]
             if ad_data.get("path2"):
