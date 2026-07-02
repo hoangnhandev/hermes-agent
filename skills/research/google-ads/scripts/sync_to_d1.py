@@ -68,23 +68,18 @@ class D1Sync:
         return [dict(row) for row in cursor.fetchall()]
 
     def get_unsynced_campaigns(self) -> List[Dict[str, Any]]:
-        """Get campaigns updated since the last successful sync (H5 fix).
+        """All non-archived campaigns, sent every sync.
 
-        Old code returned ALL active campaigns every run → payload grew
-        unbounded + campaigns re-sent every sync. Now bounded by
-        last_campaign_sync_at (tracked in sync-status.json). First run sends all.
+        Campaigns are few, so re-upserting each run is cheap + idempotent. The
+        old incremental `updated_at > last_campaign_sync_at` filter was brittle:
+        SQLite datetime('now') uses a space sep ("YYYY-MM-DD HH:MM:SS") while the
+        recorded last_campaign_sync_at used Python isoformat ('T' sep), so the
+        string compare silently failed and dropped campaigns whose status
+        changed. Always-send avoids the format mismatch entirely.
         """
-        status = self._read_status()
-        since = status.get("last_campaign_sync_at")
         cursor = self.conn.cursor()
-        if since:
-            cursor.execute(
-                "SELECT * FROM campaigns WHERE status != 'archived' AND "
-                "(updated_at > ? OR updated_at IS NULL) ORDER BY updated_at DESC",
-                (since,))
-        else:
-            cursor.execute(
-                "SELECT * FROM campaigns WHERE status != 'archived' ORDER BY updated_at DESC")
+        cursor.execute(
+            "SELECT * FROM campaigns WHERE status != 'archived' ORDER BY updated_at DESC")
         return [dict(row) for row in cursor.fetchall()]
 
     def build_sync_payload(self, metrics: List[Dict[str, Any]],
