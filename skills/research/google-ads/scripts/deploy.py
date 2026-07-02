@@ -111,13 +111,16 @@ def create_campaign(client: GoogleAdsClient, customer_id: str, name: str, daily_
         campaign.name = unique_name
         campaign.status = client.enums.CampaignStatusEnum.ENABLED
         campaign.advertising_channel_type = client.enums.AdvertisingChannelTypeEnum.SEARCH
-        # Set the inline Manual CPC strategy. Setting bidding_strategy_type (enum)
-        # alone does NOT populate the required campaign_bidding_strategy oneof —
-        # the API rejects with REQUIRED field_error on campaign_bidding_strategy.
-        # Setting manual_cpc populates the oneof AND infers the type.
-        campaign.manual_cpc = client.get_type("ManualCpc")
+        # Bidding: set BOTH the type enum and the inline manual_cpc object
+        # (canonical v21 pattern). The enum alone doesn't populate the required
+        # campaign_bidding_strategy oneof; accessing manual_cpc.enhanced_cpc_enabled
+        # auto-instantiates the inline object and satisfies the oneof.
+        campaign.bidding_strategy_type = client.enums.BiddingStrategyTypeEnum.MANUAL_CPC
         campaign.manual_cpc.enhanced_cpc_enabled = True
         campaign.campaign_budget = budget_resource_name
+        # EU political-advertising transparency is a required field in current
+        # API versions; this is commercial automotive advertising, not political.
+        campaign.contains_eu_political_advertising = False
 
         campaign_response = campaign_service.mutate_campaigns(
             customer_id=customer_id,
