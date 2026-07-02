@@ -341,13 +341,13 @@ def cmd_approve(uuid_: str, indices_str: str, mock: bool) -> int:
 
 def cmd_reject(uuid_: str) -> int:
     """Reject mode: mark pending rejected + notify. No deploy."""
-    from telegram_notify import send_text  # lazy (needs requests)
+    from telegram_notify import send_approval_text  # lazy (needs requests)
     if not read_pending(uuid_):
         print(f"❌ No pending approval for uuid {uuid_}")
         return 1
     mark_status(uuid_, "rejected")
     print(f"❌ Rejected {uuid_} — nothing deployed.")
-    send_text(f"❌ Approval {uuid_} bị từ chối — không deploy.")
+    send_approval_text(f"❌ Approval {uuid_} bị từ chối — không deploy.")
     return 0
 
 
