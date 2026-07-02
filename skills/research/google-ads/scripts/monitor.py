@@ -35,6 +35,17 @@ from _env import load_google_ads_env
 from _budget_calc import from_micros
 from _dates import account_local_today
 
+# Map Google Ads CampaignStatus enum → our DB status string. The API returns
+# an enum (ENABLED/PAUSED/REMOVED); we store readable values so the dashboard
+# shows clear status badges. ENABLED=active (serving), PAUSED, REMOVED.
+_CAMPAIGN_STATUS_MAP = {"ENABLED": "active", "PAUSED": "paused", "REMOVED": "removed"}
+
+
+def _map_campaign_status(api_status: Any) -> str:
+    """Normalize a Google Ads CampaignStatus enum/value to a DB status string."""
+    raw = getattr(api_status, "name", str(api_status))  # proto-plus enum → name
+    return _CAMPAIGN_STATUS_MAP.get(raw.split(".")[-1].strip().upper(), "active")
+
 
 class GoogleAdsMonitor:
     """Main monitor class for Google Ads monitoring."""
@@ -119,7 +130,7 @@ class GoogleAdsMonitor:
               campaign.end_date,
               campaign_budget.amount_micros
             FROM campaign
-            WHERE campaign.status = 'ENABLED'
+            WHERE campaign.status != 'REMOVED'
             ORDER BY campaign.name
             """
 
@@ -138,7 +149,7 @@ class GoogleAdsMonitor:
                 campaigns.append({
                     "campaign_id": str(campaign.id),
                     "name": campaign.name,
-                    "status": campaign.status,
+                    "status": _map_campaign_status(campaign.status),
                     "channel_type": campaign.advertising_channel_type,
                     "bidding_strategy": campaign.bidding_strategy_type,
                     "daily_budget_micros": budget_micros,
@@ -177,7 +188,7 @@ class GoogleAdsMonitor:
               metrics.conversions, metrics.conversions_value
             FROM campaign
             WHERE segments.date >= '{date_range}'
-              AND campaign.status = 'ENABLED'
+              AND campaign.status != 'REMOVED'
             ORDER BY segments.date DESC, campaign.id
             """
 
@@ -195,7 +206,7 @@ class GoogleAdsMonitor:
                 metrics.append({
                     "campaign_id": str(campaign.id),
                     "campaign_name": campaign.name,
-                    "status": campaign.status,
+                    "status": _map_campaign_status(campaign.status),
                     "channel_type": campaign.advertising_channel_type,
                     "date": segment.date,
                     "impressions": metrics_row.impressions,
@@ -342,8 +353,8 @@ class GoogleAdsMonitor:
         """Reconcile campaigns - mark missing ones as archived."""
         cursor = self.conn.cursor()
 
-        # Get all existing campaign IDs from database
-        cursor.execute("SELECT campaign_id FROM campaigns WHERE status = 'active'")
+        # Get all existing campaign IDs from database (active + paused; archived excluded)
+        cursor.execute("SELECT campaign_id FROM campaigns WHERE status != 'archived'")
         db_campaigns = [row[0] for row in cursor.fetchall()]
 
         # Get API campaign IDs
@@ -362,20 +373,27 @@ class GoogleAdsMonitor:
             )
             self.conn.commit()
 
-        # Upsert API campaigns to database
+        # Upsert API campaigns. ON CONFLICT preserves staged metadata (niche,
+        # objective, created_at) and refreshes volatile fields + the REAL status
+        # (was hardcoded 'active' → paused campaigns showed as active).
         for campaign in api_campaigns:
             cursor.execute('''
-                INSERT OR REPLACE INTO campaigns (
+                INSERT INTO campaigns (
                     campaign_id, niche, location, monthly_budget, daily_budget,
                     status, last_seen_at, has_conversion_tracking
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(campaign_id) DO UPDATE SET
+                    status=excluded.status,
+                    daily_budget=excluded.daily_budget,
+                    last_seen_at=excluded.last_seen_at,
+                    has_conversion_tracking=excluded.has_conversion_tracking
             ''', (
                 campaign['campaign_id'],
-                campaign.get('name', ''),
-                '',  # Will be updated from other sources
-                campaign.get('daily_budget', 0) * 30,  # Estimate monthly from daily
+                campaign.get('name', '') or campaign.get('niche', ''),
+                '',
+                campaign.get('monthly_budget') or (campaign.get('daily_budget', 0) * 30),
                 campaign.get('daily_budget', 0),
-                'active',
+                campaign.get('status', 'active'),
                 datetime.now().isoformat(),
                 has_conversion_tracking()
             ))
