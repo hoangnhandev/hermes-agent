@@ -178,7 +178,9 @@ class GoogleAdsMonitor:
             return []
 
         try:
-            date_range = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+            today = datetime.now(timezone.utc)
+            date_range = (today - timedelta(days=days)).strftime("%Y-%m-%d")
+            today_str = today.strftime("%Y-%m-%d")
 
             gaql_query = f"""
             SELECT
@@ -187,7 +189,7 @@ class GoogleAdsMonitor:
               metrics.impressions, metrics.clicks, metrics.cost_micros,
               metrics.conversions, metrics.conversions_value
             FROM campaign
-            WHERE segments.date >= '{date_range}'
+            WHERE segments.date BETWEEN '{date_range}' AND '{today_str}'
             ORDER BY segments.date DESC, campaign.id
             """
 
