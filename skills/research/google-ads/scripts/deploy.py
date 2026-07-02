@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import os
 import time
+import uuid
 from typing import Dict, List, Any, Optional
 
 # google-ads is optional at import time so --mock dry-runs work WITHOUT the
@@ -75,10 +76,16 @@ def create_campaign(client: GoogleAdsClient, customer_id: str, name: str, daily_
     Returns:
         Campaign resource name or None if failed
     """
-    print(f"[CAMPAIGN] Creating campaign: {name}")
+    # Budget names must be unique per account. Append a short uuid suffix so a
+    # re-deploy (or an orphan budget left by a failed prior attempt) doesn't
+    # collide with DUPLICATE_NAME. Campaign names may repeat, but suffix them
+    # too so multiple deploys are distinguishable in the UI.
+    suffix = uuid.uuid4().hex[:8]
+    unique_name = f"{name} {suffix}"
+    print(f"[CAMPAIGN] Creating campaign: {unique_name}")
 
     if isinstance(client, MockGoogleAdsClient):
-        print(f"[CAMPAIGN] Mock: Would create campaign '{name}' with budget "
+        print(f"[CAMPAIGN] Mock: Would create campaign '{unique_name}' with budget "
               f"{from_micros(daily_budget_micros):,.0f} VND")
         return f"customers/{customer_id}/campaigns/mock-campaign-123"
 
@@ -87,7 +94,7 @@ def create_campaign(client: GoogleAdsClient, customer_id: str, name: str, daily_
         budget_service = client.get_service("CampaignBudgetService")
         budget_operation = client.get_type("CampaignBudgetOperation")
         budget = budget_operation.create
-        budget.name = f"{name} - Budget"
+        budget.name = f"{unique_name} - Budget"
         budget.amount_micros = daily_budget_micros
         budget.delivery_method = client.enums.BudgetDeliveryMethodEnum.STANDARD
 
@@ -101,7 +108,7 @@ def create_campaign(client: GoogleAdsClient, customer_id: str, name: str, daily_
         campaign_service = client.get_service("CampaignService")
         campaign_operation = client.get_type("CampaignOperation")
         campaign = campaign_operation.create
-        campaign.name = name
+        campaign.name = unique_name
         campaign.status = client.enums.CampaignStatusEnum.ENABLED
         campaign.advertising_channel_type = client.enums.AdvertisingChannelTypeEnum.SEARCH
         # Set the inline Manual CPC strategy. Setting bidding_strategy_type (enum)
