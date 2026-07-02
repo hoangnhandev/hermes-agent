@@ -8,7 +8,9 @@ export async function upsertCampaign(db, campaign) {
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
     campaign.campaign_id,
-    campaign.name,
+    // Local SQLite campaigns use `niche` as the human name (no `name` col);
+    // fall back so D1 always gets a displayable name (avoids D1_TYPE_ERROR on undefined).
+    campaign.name || campaign.niche || null,
     campaign.status || 'active',
     campaign.campaign_type || 'search',
     campaign.daily_budget || 0,
