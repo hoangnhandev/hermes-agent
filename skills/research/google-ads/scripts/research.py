@@ -20,6 +20,7 @@ from pathlib import Path
 
 from _budget_calc import (
     project, budget_tier, assess_goal, model_info, market_cpc,
+    recommend_model_for_budget,
     VINFAST_MODELS, VN_AUTOMOTIVE_CPC_USD, VND_PER_USD,
 )
 
@@ -148,15 +149,24 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Vinfast Google Ads budget-aware strategy generator")
     ap.add_argument("--budget", type=int, required=True,
                     help="Monthly budget in VND (e.g. 10000000 = 10 triệu)")
-    ap.add_argument("--model", default="vf3", choices=list(VINFAST_MODELS),
-                    help="Vinfast model (default: vf3)")
+    ap.add_argument("--model", default=None, choices=list(VINFAST_MODELS),
+                    help="Vinfast model (default: auto-pick optimal by budget)")
     ap.add_argument("--market", default="vn", help="Market code (default: vn)")
     ap.add_argument("--goal-sales", type=int, default=None,
                     help="Target vehicle sales/month for honest goal check")
     ap.add_argument("--json", action="store_true", help="Output JSON only (for agent)")
     args = ap.parse_args()
 
-    strategy = build_strategy(args.budget, args.model, args.market, args.goal_sales)
+    # Auto-pick the optimal model for the budget when --model is omitted.
+    # Highest viable model (see recommend_model_for_budget): low budget → VF3,
+    # scales up to pricier higher-margin models as budget allows.
+    model = args.model
+    if model is None:
+        model, reason = recommend_model_for_budget(args.budget)
+        if not args.json:
+            print(f"🤖 Model tự chọn theo budget: {reason}\n")
+
+    strategy = build_strategy(args.budget, model, args.market, args.goal_sales)
     if args.json:
         print(json.dumps(strategy, indent=2, ensure_ascii=False))
         return

@@ -74,8 +74,8 @@ def main() -> int:
         description="Vinfast Ads one-shot: budget → strategy → approval gate (no spend)")
     ap.add_argument("--budget", type=int, required=True,
                     help="Monthly budget in VND (e.g. 5000000 = 5 triệu)")
-    ap.add_argument("--model", default="vf3",
-                    help="Vinfast model slug (default: vf3; vf3..vf9)")
+    ap.add_argument("--model", default=None,
+                    help="Vinfast model slug (default: auto-pick optimal by budget)")
     ap.add_argument("--goal-sales", type=int, default=None,
                     help="Target vehicle sales/month for honest goal check")
     args = ap.parse_args()
@@ -85,6 +85,13 @@ def main() -> int:
     # the approval ping when this script is invoked directly (not via wrapper).
     # setdefault: real env (e.g. set by Hermes gateway) wins over the file.
     load_google_ads_env()
+
+    # Auto-pick the optimal model for the budget when --model is omitted, then
+    # pass it explicitly to research.py (so both agree on the strategy file).
+    if args.model is None:
+        from _budget_calc import recommend_model_for_budget
+        args.model, reason = recommend_model_for_budget(args.budget)
+        print(f"🤖 Tự chọn model tối ưu cho {args.budget:,} VND:\n   {reason}\n")
 
     line = "═" * 60
     print(f"\n{line}\n🧠 Bước 1/2 — Nghiên cứu chiến lược ({args.budget:,} VND)\n{line}")

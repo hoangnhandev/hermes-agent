@@ -31,28 +31,38 @@ Use this skill when you need comprehensive Google Ads research including:
 ### One-shot: budget → staged campaign (Telegram entrypoint)
 
 Say "5 triệu cho vinfast" to Violet-chan → she runs ONE command that researches
-the optimal strategy AND stages the campaign (ad copy + Telegram approval
-request). No multi-step CLI. No Google Ads creds needed to stage — creds only
-at approve time. **Money-safety: it does NOT spend** — a human must approve to
-deploy (the async gate is preserved end-to-end).
+the optimal strategy AND stages the campaign (real VN ad copy + Telegram
+approval request). No multi-step CLI. No Google Ads creds needed to stage —
+creds only at approve time. **Money-safety: it does NOT spend** — a human must
+approve to deploy (the async gate is preserved end-to-end).
+
+**Model is auto-picked by budget** (no need to specify unless you want to):
+5M→VF3, 10M→VF5, 20M→VF6, 30M→VF7, 70M→VF8, 120M→VF9. Low budget picks the
+cheapest model (highest CVR); budget scales up to pricier higher-margin models.
+Override anytime with `--model`.
 
 ```bash
-# "5 triệu cho vinfast"        →  budget 5,000,000 VND, model vf3 (default)
+# "5 triệu cho vinfast"        →  5,000,000 VND, auto→VF3
 python3 scripts/stage_campaign.py --budget 5000000
 
-# "10 triệu cho vinfast vf5"
-python3 scripts/stage_campaign.py --budget 10000000 --model vf5
+# "10 triệu cho vinfast"       →  auto→VF5 (budget threshold)
+python3 scripts/stage_campaign.py --budget 10000000
 
-# "8 triệu, mục tiêu 2 xe/tháng"  →  + honest goal check
+# "8 triệu, mục tiêu 2 xe/tháng"  →  auto→VF3 + honest goal check
 python3 scripts/stage_campaign.py --budget 8000000 --goal-sales 2
 ```
 
+**Ad copy** is real, model-specific Vietnamese (deterministic, from
+`_ad_copy.py`): giá/trả góp, bảo hành 10 năm, sạc toàn quốc, lái thử CTA,
+thương hiệu + segment angles (đô thị/gia đình/premium). Policy-screened.
+
 **Violet-chan mapping** (Vietnamese budget phrase → flags):
 - "X triệu" → `--budget X×1_000_000` (5 triệu = 5000000; "500k" = 500000).
-- "vinfast" alone or "vf3" → `--model vf3` (default; best fit for low budget).
-- "vf5/vf6/vf7/vf8/vf9" → `--model <slug>`.
-- Output: honest strategy summary + a Telegram approval ping + the exact
-  `creator.py --approve <uuid> --indices …` command to finish (spend).
+- model: omit `--model` → auto-picked by budget. Add `--model vf5` only if the
+  user names a specific model.
+- "mục tiêu N xe/tháng" → `--goal-sales N` (honest goal check).
+- Output: model pick + honest strategy + a Telegram approval ping (real VN ad
+  copy) + the exact `creator.py --approve <uuid> --indices …` command to finish.
 
 After the approval request lands in Telegram, the user runs the approve
 command to deploy (needs Google Ads creds + Developer Token Basic Access for

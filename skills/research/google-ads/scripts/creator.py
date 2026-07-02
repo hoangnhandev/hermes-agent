@@ -26,57 +26,30 @@ ACCOUNT_MONTHLY_CAP = float(os.getenv("MONTHLY_BUDGET", "6000000"))
 
 
 def generate_ad_copy(plan: Dict[str, Any], niche: str) -> List[Dict[str, Any]]:
-    """Generate 10-15 ad copy variations based on research plan.
+    """Generate real, model-specific Vietnamese ad copy (RSA variations).
 
-    TODO: Integrate with Hermes LLM for copy generation
+    Deterministic VN copy from `_ad_copy` (grounded in Vinfast EV selling
+    points: giá/trả góp, bảo hành 10 năm, sạc, lái thử, thương hiệu + segment
+    angles). Headlines ≤30 chars, descriptions ≤90. Falls back to generic VN
+    copy only if the plan's model slug is unknown.
     """
     print(f"[COPY] Generating ad copy variations for '{niche}'")
-
-    # Placeholder copy generation - would be replaced by Hermes LLM (agent-layered).
-    # Accepts BOTH old plan shape (keywords[]) and research.py shape (keyword_seeds).
-    variations = []
-    if "keyword_seeds" in plan:
-        kw_map = plan["keyword_seeds"]
-        keywords = [k for cat in ("branded", "non_branded", "intent")
-                    for k in kw_map.get(cat, [])]
-    else:
-        keywords = [kw.get("keyword", str(kw)) for kw in plan.get("keywords", [])]
-    competitors = plan.get("competitors", [])
-    location = plan.get("location") or {"vn": "Vietnam"}.get(
-        plan.get("market", "vn"), "Vietnam")
-
-    # Generate variations with different angles
-    angles = [
-        "Expert", "Professional", "Local", "Affordable", "Quality",
-        "Reliable", "Fast", "Experienced", "Certified", "Trusted"
-    ]
-
-    for i in range(12):
-        angle = angles[i % len(angles)]
-        # Google Ads RSA limits: headline ≤30 chars, description ≤90. Truncate
-        # placeholder copy to stay policy-valid (real copy via agent-layered LLM).
-        n = niche.title()
-        headlines = [
-            f"{angle} {n}"[:30],
-            f"Best {n}"[:30],
-            f"{n} {location}"[:30],
-        ]
-
-        descriptions = [
-            f"Professional {niche} in {location}. Book a test drive today!"[:90],
-            f"Local {niche} experts. Quality service, competitive price."[:90],
-        ]
-
-        variations.append({
-            "headlines": headlines,
-            "descriptions": descriptions,
-            "path1": niche.replace(" ", "-"),
-            "path2": angle.lower()
-        })
-
-    print(f"[COPY] Generated {len(variations)} variations (placeholder; "
-          f"agent layers real Vinfast copy via LLM)")
-    return variations
+    slug = (plan.get("model") or {}).get("slug", "vf3")
+    try:
+        from _ad_copy import build_variations
+        variations = build_variations(slug, plan)
+        print(f"[COPY] Generated {len(variations)} real VN variations "
+              f"(model={slug})")
+        return variations
+    except KeyError:
+        print(f"[COPY] Unknown model '{slug}' — using generic VN fallback copy")
+    # Fallback: minimal generic VN copy (keeps the function total).
+    return [{
+        "headlines": [niche[:30], f"{niche} Việt Nam"[:30], f"Lái thử {niche}"[:30]],
+        "descriptions": [f"{niche} — xe điện Vinfast. Lái thử miễn phí."[:90],
+                         f"Trải nghiệm {niche}. Đăng ký ngay."[:90]],
+        "path1": niche.replace(" ", "-")[:15], "path2": "default",
+    } for _ in range(6)]
 
 
 def run_budget_guardrails(db: sqlite3.Connection, daily_budget: float) -> bool:

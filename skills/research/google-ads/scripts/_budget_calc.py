@@ -271,3 +271,41 @@ def model_info(slug: str) -> ModelInfo:
     if s not in VINFAST_MODELS:
         raise KeyError(f"Unknown model '{slug}'. Valid: {list(VINFAST_MODELS)}")
     return VINFAST_MODELS[s]
+
+
+# ── Budget → model recommendation ───────────────────────────────────────────
+# Minimum monthly budget (VND) for a model to be "viable" — derived from the
+# budget_fit notes (VF6 needs ~$400/mo, VF7 ~$1000/mo, …) converted via
+# VND_PER_USD. Viability = enough spend to generate meaningful leads for that
+# price tier (pricier cars need more budget to convert).
+MODEL_BUDGET_MIN_VND = {
+    "vf3": 0,             # cheapest, highest CVR — viable at any budget
+    "vf5": 8_000_000,     # sweet-spot A0 SUV (~$320/mo)
+    "vf6": 12_000_000,    # A-SUV (~$480/mo; budget_fit says $400+)
+    "vf7": 28_000_000,    # C-SUV premium (~$1120/mo; budget_fit says $1000+)
+    "vf8": 60_000_000,    # D-SUV (~$2400/mo)
+    "vf9": 100_000_000,   # flagship (~$4000/mo)
+}
+
+
+def recommend_model_for_budget(budget_vnd: int) -> tuple[str, str]:
+    """Pick the optimal Vinfast model for a monthly budget (VND).
+
+    Returns (slug, reason). Chooses the HIGHEST model whose viability
+    threshold the budget meets (MODEL_BUDGET_MIN_VND is ordered vf3→vf9).
+    Low budget → VF3 (cheapest, highest CVR); as budget scales, pricier
+    higher-margin models become viable. Under the projection's constant CVR,
+    pricier = more projected revenue per sale, so the highest viable model
+    maximizes revenue. Real CVR falls for pricier cars (NOT modeled) → treat
+    as upper bound; override with --model when you have segment CVR data.
+    """
+    if budget_vnd < 0:
+        raise ValueError(f"budget_vnd must be >= 0, got {budget_vnd}")
+    chosen, chosen_min = "vf3", MODEL_BUDGET_MIN_VND["vf3"]
+    for slug, min_vnd in MODEL_BUDGET_MIN_VND.items():   # ascending order
+        if budget_vnd >= min_vnd:
+            chosen, chosen_min = slug, min_vnd
+    m = VINFAST_MODELS[chosen]
+    reason = (f"budget {budget_vnd:,} VND/tháng ≥ ngưỡng {chosen_min:,} VND "
+              f"cho {m.name} ({m.segment}). " + m.budget_fit)
+    return chosen, reason
