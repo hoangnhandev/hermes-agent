@@ -118,9 +118,11 @@ def create_campaign(client: GoogleAdsClient, customer_id: str, name: str, daily_
         campaign.bidding_strategy_type = client.enums.BiddingStrategyTypeEnum.MANUAL_CPC
         campaign.manual_cpc.enhanced_cpc_enabled = True
         campaign.campaign_budget = budget_resource_name
-        # EU political-advertising transparency is a required field in current
-        # API versions; this is commercial automotive advertising, not political.
-        campaign.contains_eu_political_advertising = False
+        # EU political-advertising transparency is a required enum field in
+        # current API versions (EuPoliticalAdvertisingStatus, NOT a bool).
+        # This is commercial automotive advertising, not political.
+        campaign.contains_eu_political_advertising = (
+            client.enums.EuPoliticalAdvertisingStatusEnum.DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING)
 
         campaign_response = campaign_service.mutate_campaigns(
             customer_id=customer_id,
