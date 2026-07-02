@@ -13,6 +13,7 @@ from typing import Dict, List, Any, Optional
 from _store import init_db, get_total_existing_daily_budget, get_total_monthly_budget, save_copy, save_campaign
 from policy_check import screen_ad_copy
 from approval_gate import write_pending, read_pending, mark_status, approval_lock
+from _env import load_google_ads_env
 # NOTE: deploy is lazy-imported inside deploy_campaign() so creator.py stays
 # importable without the google-ads lib (needed only for actual deployment).
 # telegram_notify is lazy-imported inside cmd_* (needs `requests`).
@@ -20,9 +21,12 @@ from approval_gate import write_pending, read_pending, mark_status, approval_loc
 MAX_DAILY_MULTIPLIER = 2
 BATCH_SIZE = 10
 # Account monthly spend cap in VND (env override; default 6,000,000).
-# VND is the skill's currency everywhere a user sees a number. Used by the
-# guardrail so the cap is a real ceiling, not derived from the proposed campaign.
-ACCOUNT_MONTHLY_CAP = float(os.getenv("MONTHLY_BUDGET", "6000000"))
+# VND is the skill's currency everywhere a user sees a number. Read LAZILY
+# (not at import) so it honors google-ads.env even when creator.py is run
+# directly (no shell `source`) — load_google_ads_env() is called in main().
+def account_monthly_cap() -> float:
+    """Account monthly spend cap (VND), read live from env each call."""
+    return float(os.getenv("MONTHLY_BUDGET", "6000000"))
 
 
 def generate_ad_copy(plan: Dict[str, Any], niche: str) -> List[Dict[str, Any]]:
@@ -66,24 +70,25 @@ def run_budget_guardrails(db: sqlite3.Connection, daily_budget: float) -> bool:
     # under 1M VND/mo almost always means a stale USD placeholder (e.g. 500) on
     # a VND-native account → caps every deploy at near-zero. Non-fatal so a
     # genuinely tiny test budget still works.
-    if ACCOUNT_MONTHLY_CAP < 1_000_000:
-        print(f"⚠️ [BUDGET] WARNING: MONTHLY_BUDGET={ACCOUNT_MONTHLY_CAP:,.0f} VND/mo "
+    cap = account_monthly_cap()
+    if cap < 1_000_000:
+        print(f"⚠️ [BUDGET] WARNING: MONTHLY_BUDGET={cap:,.0f} VND/mo "
               f"is below 1,000,000 — likely a USD placeholder on a VND-native "
               f"account. Set the real VND monthly budget in google-ads.env.")
 
     print(f"[BUDGET] Checking guardrails: daily {daily_budget:,.0f} VND "
-          f"(account cap {ACCOUNT_MONTHLY_CAP:,.0f} VND/mo)")
+          f"(account cap {cap:,.0f} VND/mo)")
     existing_monthly = get_total_monthly_budget(db)        # EXISTING campaigns only
     proposed_monthly = existing_monthly + (daily_budget * 30)
-    if proposed_monthly > ACCOUNT_MONTHLY_CAP:
+    if proposed_monthly > cap:
         print(f"⚠️ BUDGET GUARD: account cap exceeded")
         print(f"   Existing {existing_monthly:,.0f} VND/mo + proposed "
               f"{daily_budget*30:,.0f} VND/mo = {proposed_monthly:,.0f} VND/mo")
-        print(f"   Cap {ACCOUNT_MONTHLY_CAP:,.0f} VND/mo (MONTHLY_BUDGET env)")
+        print(f"   Cap {cap:,.0f} VND/mo (MONTHLY_BUDGET env)")
         print(f"   → Reduce daily budget or pause another campaign.")
         return False
     print(f"[BUDGET] OK — projected {proposed_monthly:,.0f} VND/mo ≤ "
-          f"cap {ACCOUNT_MONTHLY_CAP:,.0f} VND/mo")
+          f"cap {cap:,.0f} VND/mo")
     return True
 
 
@@ -155,6 +160,13 @@ def deploy_campaign(plan: Dict[str, Any], approved_variations: List[Dict[str, An
           f"({'MOCK' if allow_mock else 'LIVE'} mode)")
 
     from deploy import get_client, deploy_full_campaign  # lazy: needs google-ads lib
+    # Init the client FIRST: get_client() calls load_google_ads_env(), which
+    # populates GOOGLE_ADS_* into os.environ. Checking os.getenv("GOOGLE_ADS_CUSTOMER_ID")
+    # BEFORE this misses it when creator.py is run directly (no `source` in the
+    # shell) — the old order raised "GOOGLE_ADS_CUSTOMER_ID not set" despite the
+    # var being present in google-ads.env. main() also loads env, but this keeps
+    # deploy_campaign correct for direct callers too.
+    client = get_client(allow_mock=allow_mock)
     customer_id = customer_id or os.getenv("GOOGLE_ADS_CUSTOMER_ID")
     if not customer_id:
         if not allow_mock:
@@ -162,7 +174,6 @@ def deploy_campaign(plan: Dict[str, Any], approved_variations: List[Dict[str, An
                 "GOOGLE_ADS_CUSTOMER_ID not set. Set it in google-ads.env or use --mock.")
         customer_id = "1234567890"  # mock only
 
-    client = get_client(allow_mock=allow_mock)
     result = deploy_full_campaign(client, customer_id, plan, approved_variations)
     return result  # dict: {success, campaign_resource_name, keywords_created, ads_created, ...}
 
@@ -362,6 +373,10 @@ def cmd_reject(uuid_: str) -> int:
 
 
 def main():
+    # Populate GOOGLE_ADS_* + TELEGRAM_* from google-ads.env so --approve / --reject
+    # work when run DIRECTLY (the Telegram-approval command has no stage_campaign
+    # wrapper to load env). setdefault: real env (Hermes gateway) wins over file.
+    load_google_ads_env()
     parser = argparse.ArgumentParser(description="Google Ads Campaign Creator (async approval)")
     parser.add_argument("--plan", type=str, help="Research strategy JSON (create mode)")
     parser.add_argument("--budget", type=int, help="Override monthly budget VND (create mode)")
