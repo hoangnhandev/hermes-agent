@@ -104,7 +104,12 @@ def create_campaign(client: GoogleAdsClient, customer_id: str, name: str, daily_
         campaign.name = name
         campaign.status = client.enums.CampaignStatusEnum.ENABLED
         campaign.advertising_channel_type = client.enums.AdvertisingChannelTypeEnum.SEARCH
-        campaign.bidding_strategy_type = client.enums.BiddingStrategyTypeEnum.MANUAL_CPC
+        # Set the inline Manual CPC strategy. Setting bidding_strategy_type (enum)
+        # alone does NOT populate the required campaign_bidding_strategy oneof —
+        # the API rejects with REQUIRED field_error on campaign_bidding_strategy.
+        # Setting manual_cpc populates the oneof AND infers the type.
+        campaign.manual_cpc = client.get_type("ManualCpc")
+        campaign.manual_cpc.enhanced_cpc_enabled = True
         campaign.campaign_budget = budget_resource_name
 
         campaign_response = campaign_service.mutate_campaigns(
