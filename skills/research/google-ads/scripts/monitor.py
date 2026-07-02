@@ -382,9 +382,12 @@ class GoogleAdsMonitor:
                     status, last_seen_at, has_conversion_tracking
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(campaign_id) DO UPDATE SET
+                    niche=excluded.niche,
                     status=excluded.status,
                     daily_budget=excluded.daily_budget,
+                    monthly_budget=excluded.monthly_budget,
                     last_seen_at=excluded.last_seen_at,
+                    updated_at=datetime('now'),
                     has_conversion_tracking=excluded.has_conversion_tracking
             ''', (
                 campaign['campaign_id'],
