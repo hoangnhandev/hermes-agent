@@ -92,6 +92,22 @@ def send_text(text: str) -> bool:
     return _post(text, _report_creds())
 
 
+def send_anomaly(anomaly_type: str, entity_name: str, metric_name: str,
+                 current: float, baseline: float, change_pct: float) -> bool:
+    """Ping the REPORT channel about a detected anomaly (wire 4).
+
+    Best-effort: never raises. Returns False on missing creds or send failure so
+    monitor sync is never blocked by a Telegram outage.
+    """
+    arrow = "▲" if change_pct >= 0 else "▼"
+    text = (
+        f"⚠️ *ANOMALY: {anomaly_type}*\n"
+        f"`{entity_name}` — {metric_name}\n"
+        f"{arrow} {current:.2f} vs baseline {baseline:.2f} ({change_pct:+.1f}%)"
+    )
+    return _post(text, _report_creds())
+
+
 def send_approval_text(text: str) -> bool:
     """Approval/deploy channel (Violet-chan → user DM)."""
     return _post(text, _approval_creds())

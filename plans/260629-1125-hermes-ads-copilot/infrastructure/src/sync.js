@@ -37,7 +37,7 @@ export async function handleSync(request, env) {
 
   try {
     const body = await request.json();
-    const { metrics, leads, campaigns, ad_groups, ads, keywords } = body;
+    const { metrics, leads, campaigns, ad_groups, ads, keywords, anomalies } = body;
 
     const syncedCounts = {
       metrics: 0,
@@ -45,7 +45,8 @@ export async function handleSync(request, env) {
       campaigns: 0,
       ad_groups: 0,
       ads: 0,
-      keywords: 0
+      keywords: 0,
+      anomalies: 0
     };
 
     // Process campaigns
@@ -117,6 +118,37 @@ export async function handleSync(request, env) {
           keyword.created_at || new Date().toISOString()
         ).run();
         syncedCounts.keywords++;
+      }
+    }
+
+    // Process anomalies (wire 5). INSERT OR IGNORE respects the
+    // (detected_at, entity_id, anomaly_type) PK so re-syncs don't duplicate.
+    // Per-row try/catch (review M2): a single bad anomaly insert (transient D1
+    // error / schema drift) must NOT fail the whole POST and block the metrics
+    // batch that runs next — isolate + continue.
+    if (anomalies && anomalies.length > 0) {
+      for (const anomaly of anomalies) {
+        try {
+          await env.DB.prepare(`
+            INSERT OR IGNORE INTO anomalies (
+              detected_at, anomaly_type, entity_id, entity_name,
+              metric_name, current_value, baseline_value, change_pct, synced_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).bind(
+            anomaly.detected_at || new Date().toISOString(),
+            anomaly.anomaly_type,
+            anomaly.entity_id || null,
+            anomaly.entity_name || null,
+            anomaly.metric_name,
+            anomaly.current_value ?? null,
+            anomaly.baseline_value ?? null,
+            anomaly.change_pct ?? null,
+            new Date().toISOString()
+          ).run();
+          syncedCounts.anomalies++;
+        } catch (e) {
+          console.error('Anomaly insert failed (continuing):', e?.message || e);
+        }
       }
     }
 

@@ -38,8 +38,20 @@ def _conn() -> sqlite3.Connection:
     return conn
 
 
+def _ensure_column(conn: sqlite3.Connection, table: str, col: str, decl: str) -> None:
+    """Add `col` to `table` if missing (safe for pre-existing DBs)."""
+    existing = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+    if col not in existing:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+
+
 def _ensure_optimization_log(conn: sqlite3.Connection) -> None:
-    """Create optimization_log if missing (tracks actions + later impact)."""
+    """Create optimization_log if missing (tracks actions + later impact).
+
+    Wire 3: added magnitude/expected/status columns. status defaults to
+    'recommended' — actions are recommend-only and NEVER auto-applied. The
+    `--apply` auto-mutate path is a later tactics phase (needs 30d real data).
+    """
     conn.execute("""
         CREATE TABLE IF NOT EXISTS optimization_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -49,11 +61,18 @@ def _ensure_optimization_log(conn: sqlite3.Connection) -> None:
             entity_type TEXT,
             entity_id TEXT,
             action TEXT NOT NULL,
+            magnitude TEXT,
             reason TEXT,
+            expected TEXT,
+            status TEXT NOT NULL DEFAULT 'recommended',
             metric_snapshot TEXT,
             created_at TEXT NOT NULL DEFAULT (datetime('now'))
         )
     """)
+    # Backfill columns for pre-existing DBs created before wire 3.
+    _ensure_column(conn, "optimization_log", "magnitude", "TEXT")
+    _ensure_column(conn, "optimization_log", "expected", "TEXT")
+    _ensure_column(conn, "optimization_log", "status", "TEXT NOT NULL DEFAULT 'recommended'")
     conn.commit()
 
 
@@ -125,31 +144,83 @@ def _entity_dict(r: sqlite3.Row) -> dict:
             "cpa": round(cost / conv, 2) if conv else None}
 
 
-def _recommend(cur: dict, base: dict | None, top: list, wasted: list) -> list:
-    """Generate actionable optimization recommendations (the plan)."""
+def _resolve_names(conn: sqlite3.Connection, entity_type: str, entities: list) -> list:
+    """Attach a display `name` to each entity (keyword text / campaign niche).
+
+    Lets _recommend emit ADD_NEGATIVE <text> and the report show human-readable
+    targets. No-op for entity types without a name table. entity_id for keywords
+    is keywords.id; for campaigns it's campaign_id.
+    """
+    if not entities or entity_type not in ("keyword", "campaign"):
+        return entities
+    ids = [str(e["entity_id"]) for e in entities]
+    ph = ",".join("?" for _ in ids)
+    if entity_type == "keyword":
+        rows = conn.execute(f"SELECT id, keyword FROM keywords WHERE id IN ({ph})", ids).fetchall()
+        lookup = {str(r["id"]): r["keyword"] for r in rows}
+    else:
+        rows = conn.execute(f"SELECT campaign_id, niche FROM campaigns WHERE campaign_id IN ({ph})", ids).fetchall()
+        lookup = {str(r["campaign_id"]): r["niche"] for r in rows}
+    for e in entities:
+        e["name"] = lookup.get(str(e["entity_id"]), "")
+    return entities
+
+
+def _recommend(cur: dict, base: dict | None, top: list, wasted: list,
+               entity_type: str = "keyword") -> list:
+    """Concrete, apply-able recommendations (recommend-only; never auto-mutate).
+
+    Action verbs are entity-typed so each maps 1:1 to a future --apply step:
+      SCALE_BUDGET <id> +<pct> | PAUSE_KEYWORD <id> | ADD_NEGATIVE <text>
+      | PAUSE_CAMPAIGN <id> | WATCH_CVR_DROP | HOLD
+    """
     actions = []
+    etype = entity_type
+
     # Scale winners
     for e in top:
         if e["conversions"] >= SCALE_MIN_CONVERSIONS and (
                 e["cpa"] is None or e["cpa"] <= CPA_GOOD_VND):
-            actions.append({"action": "SCALE", "entity": e["entity_id"],
-                            "reason": f"{e['conversions']} conv, CPA {fmt_vnd(e['cpa'])} — tăng bid/budget"})
-    # Pause wasted spend
+            actions.append({"entity_type": etype, "entity": e["entity_id"],
+                            "action": "SCALE_BUDGET", "magnitude": "+20%",
+                            "reason": f"{e['conversions']} conv, CPA {fmt_vnd(e['cpa'])} — tăng bid/budget",
+                            "expected": "Thêm conversions giữ CPA ≤ ngưỡng tốt"})
+
+    # Pause wasted spend (losers). For keywords also suggest a negative.
     for e in wasted:
-        actions.append({"action": "PAUSE", "entity": e["entity_id"],
-                        "reason": f"{fmt_vnd(e['cost'])} chi, 0 conv — pause hoặc negative"})
+        if etype == "keyword":
+            actions.append({"entity_type": etype, "entity": e["entity_id"],
+                            "action": "PAUSE_KEYWORD", "magnitude": "",
+                            "reason": f"{fmt_vnd(e['cost'])} chi, 0 conv — pause keyword",
+                            "expected": "Dừng lãng phí click không convert"})
+            if e.get("name"):
+                actions.append({"entity_type": etype, "entity": e["entity_id"],
+                                "action": f"ADD_NEGATIVE {e['name']}", "magnitude": "",
+                                "reason": "Wasted-spend keyword — thêm negative chặn",
+                                "expected": "Giảm impression/click sai intent"})
+        else:
+            actions.append({"entity_type": etype, "entity": e["entity_id"],
+                            "action": "PAUSE_CAMPAIGN", "magnitude": "",
+                            "reason": f"{fmt_vnd(e['cost'])} chi, 0 conv — review/pause campaign",
+                            "expected": "Dừng lãng phí cấp campaign"})
+
     # CVR trend watch
     if base and cur["clicks"] > 50 and base["cvr"] > 0:
         drop = (base["cvr"] - cur["cvr"]) / base["cvr"] * 100
         if drop >= CVR_DROP_PCT:
-            actions.append({"action": "WATCH_CVR_DROP", "entity": "*",
+            actions.append({"entity_type": "*", "entity": "*",
+                            "action": "WATCH_CVR_DROP", "magnitude": f"-{drop:.0f}%",
                             "reason": f"CVR giảm {drop:.0f}% vs baseline "
                                       f"({cur['cvr']*100:.1f}% ← {base['cvr']*100:.1f}%) — "
-                                      f"kiểm tra landing page/ad copy/negative kw"})
+                                      f"kiểm tra landing page/ad copy/negative kw",
+                            "expected": "CVR phục hồi sau fix"})
+
     if not actions:
-        actions.append({"action": "HOLD", "entity": "*",
+        actions.append({"entity_type": "*", "entity": "*",
+                        "action": "HOLD", "magnitude": "",
                         "reason": "Không đủ signal mạnh — tiếp tục thu data, "
-                                  "tối ưu landing page trước khi rebid."})
+                                  "tối ưu landing page trước khi rebid.",
+                        "expected": "Đủ data để decide kỳ sau"})
     return actions
 
 
@@ -161,7 +232,9 @@ def analyze(days: int = 30, entity_type: str = "keyword") -> dict:
     base = _agg(conn, entity_type, bs, be) if _has_data(conn, entity_type, bs, be) else None
     top = _top_performers(conn, entity_type, cs, ce)
     wasted = _wasted_spend(conn, entity_type, cs, ce)
-    actions = _recommend(cur, base, top, wasted)
+    _resolve_names(conn, entity_type, top)
+    _resolve_names(conn, entity_type, wasted)
+    actions = _recommend(cur, base, top, wasted, entity_type)
     # Period-over-period deltas
     deltas = _deltas(cur, base)
     result = {
@@ -198,16 +271,18 @@ def _deltas(cur: dict, base: dict | None) -> dict:
 
 
 def _log_actions(result: dict) -> None:
-    """Persist recommendations to optimization_log (for impact tracking next run)."""
+    """Persist recommendations to optimization_log (status='recommended', wire 3)."""
     conn = _conn()
     cs = result["current_period"]["start"]
     ce = result["current_period"]["end"]
     for a in result["recommendations"]:
         conn.execute("""INSERT INTO optimization_log
-            (run_date, period_start, period_end, entity_type, entity_id, action, reason)
-            VALUES (?,?,?,?,?,?,?)""",
-            (result["run_date"], cs, ce, result["entity_type"],
-             a["entity"], a["action"], a["reason"]))
+            (run_date, period_start, period_end, entity_type, entity_id,
+             action, magnitude, reason, expected, status)
+            VALUES (?,?,?,?,?,?,?,?,?, 'recommended')""",
+            (result["run_date"], cs, ce, a.get("entity_type"),
+             a["entity"], a["action"], a.get("magnitude", ""),
+             a["reason"], a.get("expected", "")))
     conn.commit()
     conn.close()
 
@@ -230,15 +305,18 @@ def print_report(r: dict) -> None:
         print(f"\n📅 {d.get('note', '(no baseline)')}")
     print(f"\n🏆 TOP PERFORMERS (scale lên):")
     for e in r["top_performers"][:5]:
-        print(f"   • {e['entity_id']}: {e['conversions']} conv, "
+        nm = f" ({e['name']})" if e.get("name") else ""
+        print(f"   • {e['entity_id']}{nm}: {e['conversions']} conv, "
               f"{fmt_vnd(e['cost'])} cost, CPA {fmt_vnd(e['cpa']) if e['cpa'] else '-'}")
     if r["wasted_spend"]:
         print(f"\n🗑️ WASTED SPEND (pause/negative):")
         for e in r["wasted_spend"][:5]:
-            print(f"   • {e['entity_id']}: {fmt_vnd(e['cost'])} chi, 0 conv")
-    print(f"\n🎯 KẾ HOẠCH TỐI ƯU THÁNG SAU:")
+            nm = f" ({e['name']})" if e.get("name") else ""
+            print(f"   • {e['entity_id']}{nm}: {fmt_vnd(e['cost'])} chi, 0 conv")
+    print(f"\n🎯 KẾ HOẠCH TỐI ƯU THÁNG SAU (recommend-only):")
     for a in r["recommendations"]:
-        print(f"   [{a['action']}] {a['entity']} — {a['reason']}")
+        mag = f" {a['magnitude']}" if a.get("magnitude") else ""
+        print(f"   [{a['action']}{mag}] {a['entity']} — {a['reason']}")
     print(f"{line}\n")
 
 

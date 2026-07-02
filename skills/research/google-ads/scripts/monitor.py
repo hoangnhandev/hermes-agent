@@ -22,9 +22,18 @@ try:
 except ImportError:
     GOOGLE_ADS_AVAILABLE = False
 
-from _store import init_campaigns_db, upsert_metric, save_anomaly, get_campaign_baseline_metrics
+from _store import (
+    init_campaigns_db,
+    upsert_metric,
+    save_anomaly,
+    get_campaign_baseline_metrics,
+    has_conversion_tracking,
+    find_or_create_keyword,
+    mark_anomalies_alerted,
+)
 from _env import load_google_ads_env
 from _budget_calc import from_micros
+from _dates import account_local_today
 
 
 class GoogleAdsMonitor:
@@ -203,6 +212,74 @@ class GoogleAdsMonitor:
             print(f"[Monitor] Error querying metrics: {e}")
             return []
 
+
+    def query_keyword_metrics(self, days: int = 7) -> List[Dict[str, Any]]:
+        """Query keyword-level metrics from Google Ads API (plan wire 2).
+
+        Mirrors query_metrics but against `keyword_view`, returning one row per
+        (campaign, ad_group, keyword text, match_type, date). Cost is converted
+        to VND via from_micros. run_sync maps each row to a keywords.id and
+        upserts it into daily_metrics with entity_type='keyword' so the optimize
+        + reporting paths have keyword-level data.
+        """
+        if not self.googleads_client:
+            print("[Monitor] Google Ads client not available, returning empty keyword metrics")
+            return []
+
+        try:
+            date_range = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+
+            gaql_query = f"""
+            SELECT
+              segments.date,
+              campaign.id, campaign.status,
+              ad_group.id,
+              ad_group_criterion.keyword.text,
+              ad_group_criterion.keyword.match_type,
+              ad_group_criterion.status,
+              metrics.impressions, metrics.clicks, metrics.cost_micros,
+              metrics.conversions, metrics.conversions_value
+            FROM keyword_view
+            WHERE segments.date >= '{date_range}'
+              AND campaign.status = 'ENABLED'
+              AND ad_group_criterion.status = 'ENABLED'
+            ORDER BY segments.date DESC, campaign.id
+            """
+
+            query_response = self.googleads_client.get_service("GoogleAdsService").search(
+                customer_id=self.customer_id,
+                query=gaql_query
+            )
+
+            rows = []
+            for row in query_response:
+                metrics_row = row.metrics
+                kw = row.ad_group_criterion.keyword
+                # API match_type is an enum (e.g. KeywordMatchType.PHRASE) → lowercase.
+                match_type = kw.match_type.name.lower() if kw.match_type else "phrase"
+                rows.append({
+                    "campaign_id": str(row.campaign.id),
+                    "ad_group_id": str(row.ad_group.id),
+                    "keyword_text": kw.text or "",
+                    "match_type": match_type,
+                    "date": row.segments.date,
+                    "impressions": metrics_row.impressions,
+                    "clicks": metrics_row.clicks,
+                    "cost": from_micros(metrics_row.cost_micros) if metrics_row.cost_micros else 0.0,
+                    "conversions": metrics_row.conversions,
+                    "conversion_value": metrics_row.conversions_value,
+                })
+
+            print(f"[Monitor] Queried {len(rows)} keyword metrics from API")
+            return rows
+
+        except GoogleAdsException as e:
+            print(f"[Monitor] Google Ads API error querying keyword metrics: {e}")
+            return []
+        except Exception as e:
+            print(f"[Monitor] Error querying keyword metrics: {e}")
+            return []
+
     def query_leads(self, days: int = 7) -> List[Dict[str, Any]]:
         """Query conversion data from Google Ads API."""
         if not self.googleads_client:
@@ -285,8 +362,9 @@ class GoogleAdsMonitor:
         for campaign in api_campaigns:
             cursor.execute('''
                 INSERT OR REPLACE INTO campaigns (
-                    campaign_id, niche, location, monthly_budget, daily_budget, status, last_seen_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    campaign_id, niche, location, monthly_budget, daily_budget,
+                    status, last_seen_at, has_conversion_tracking
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 campaign['campaign_id'],
                 campaign.get('name', ''),
@@ -294,11 +372,30 @@ class GoogleAdsMonitor:
                 campaign.get('daily_budget', 0) * 30,  # Estimate monthly from daily
                 campaign.get('daily_budget', 0),
                 'active',
-                datetime.now().isoformat()
+                datetime.now().isoformat(),
+                has_conversion_tracking()
             ))
 
         self.conn.commit()
         print(f"[Monitor] Reconciled {len(api_campaigns)} campaigns")
+
+    def _already_alerted(self, entity_id: str, anomaly_type: str) -> bool:
+        """True if (entity, type) was already alerted today — dedupe for wire 4.
+
+        Prevents re-pinging Telegram on every sync for the same-day anomaly.
+        Cross-day persistence re-alerts (intended: still anomalous next day).
+        """
+        try:
+            cur = self.conn.cursor()
+            cur.execute(
+                "SELECT 1 FROM anomaly_log WHERE entity_id=? AND anomaly_type=? "
+                "AND alert_sent=1 AND date(detected_at)=date('now') LIMIT 1",
+                (entity_id, anomaly_type),
+            )
+            return cur.fetchone() is not None
+        except Exception as e:
+            print(f"[Monitor] _already_alerted check error: {e}")
+            return False
 
     def detect_anomalies(self):
         """Detect anomalies based on thresholds."""
@@ -317,8 +414,10 @@ class GoogleAdsMonitor:
             if baseline['days_with_data'] < 7:
                 continue
 
-            # Get today's metrics
-            today = datetime.now().strftime("%Y-%m-%d")
+            # Get today's metrics. "today" is ACCOUNT-LOCAL (wire 6c) to match
+            # segments.date (account-local, VN=UTC+7); a naive UTC datetime.now()
+            # drifts the day boundary and misses/phantoms the day-edge row.
+            today = account_local_today()
             cursor.execute('''
                 SELECT impressions, clicks, cost, conversions FROM daily_metrics
                 WHERE entity_type = 'campaign' AND entity_id = ? AND date = ?
@@ -379,9 +478,20 @@ class GoogleAdsMonitor:
                     'change_pct': -100
                 })
 
-        # Save anomalies to database
+        # Save anomalies, dedupe by (entity+type+day), ping Telegram (wire 4).
+        # Telegram is optional + best-effort: a missing dep or outage must never
+        # block the sync cycle.
+        try:
+            from telegram_notify import send_anomaly
+        except Exception as e:
+            send_anomaly = None
+            print(f"[Monitor] telegram_notify unavailable ({e}); anomalies log only")
+
+        alerted_ids = []
         for anomaly in anomalies_found:
-            save_anomaly(
+            if self._already_alerted(anomaly['campaign_id'], anomaly['type']):
+                continue
+            aid = save_anomaly(
                 self.conn,
                 anomaly['type'],
                 anomaly['campaign_id'],
@@ -392,12 +502,29 @@ class GoogleAdsMonitor:
                 anomaly['change_pct']
                 # TODO: LLM analysis - will be implemented later
             )
+            if aid == -1:
+                continue
+            if send_anomaly:
+                try:
+                    sent = send_anomaly(
+                        anomaly['type'],
+                        anomaly.get('niche') or anomaly['campaign_id'],
+                        anomaly['metric'],
+                        anomaly['current_value'],
+                        anomaly['baseline_value'],
+                        anomaly['change_pct'],
+                    )
+                except Exception as e:
+                    print(f"[Monitor] Telegram anomaly send error: {e}")
+                    sent = False
+                if sent:
+                    alerted_ids.append(aid)
 
-        print(f"[Monitor] Detected {len(anomalies_found)} anomalies")
+        if alerted_ids:
+            mark_anomalies_alerted(self.conn, alerted_ids)
 
-        # TODO: Send Telegram alerts for anomalies
-        if anomalies_found:
-            print("[Monitor] Anomalies detected - Telegram alerts would be sent here")
+        print(f"[Monitor] Detected {len(anomalies_found)} anomalies, "
+              f"{len(alerted_ids)} alerted via Telegram")
 
     def run_sync(self) -> bool:
         """Run full sync cycle."""
@@ -438,6 +565,31 @@ class GoogleAdsMonitor:
                     metric['cost'],
                     metric['conversions'],
                     metric['conversion_value']
+                )
+                metrics_synced += 1
+
+            # Keyword-level metrics → daily_metrics entity_type='keyword' (wire 2).
+            # Map each GAQL keyword_view row to a keywords.id (insert if the keyword
+            # is new to this campaign) so optimize + reporting have keyword data.
+            keyword_metrics = self.query_keyword_metrics(7)
+            for km in keyword_metrics:
+                if not km["keyword_text"]:
+                    continue
+                kw_id = find_or_create_keyword(
+                    self.conn, km["campaign_id"], km["keyword_text"], km["match_type"]
+                )
+                if kw_id == -1:
+                    continue
+                upsert_metric(
+                    self.conn,
+                    'keyword',
+                    str(kw_id),
+                    km['date'],
+                    km['impressions'],
+                    km['clicks'],
+                    km['cost'],
+                    km['conversions'],
+                    km['conversion_value'],
                 )
                 metrics_synced += 1
 

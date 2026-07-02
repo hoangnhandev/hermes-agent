@@ -10,6 +10,7 @@ debt; revisit if a 3rd caller or >1000 lines arrives.
 """
 import sqlite3
 import json
+import os
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timedelta
@@ -131,6 +132,12 @@ def create_tables(conn: sqlite3.Connection):
         )
     ''')
 
+    # Wire 5: anomaly_log gains synced_to_d1 (D1 sync flag, independent of the
+    # Telegram alert_sent flag). Backfill for pre-existing DBs.
+    _cols = {r["name"] for r in cursor.execute("PRAGMA table_info(anomaly_log)")}
+    if "synced_to_d1" not in _cols:
+        cursor.execute("ALTER TABLE anomaly_log ADD COLUMN synced_to_d1 INTEGER DEFAULT 0")
+
     # Create indexes for better query performance
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_campaigns_id ON campaigns(campaign_id)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_ad_copy_history_campaign_id ON ad_copy_history(campaign_id)')
@@ -144,6 +151,20 @@ def create_tables(conn: sqlite3.Connection):
 
     conn.commit()
     print("[DB] Tables created successfully")
+
+
+def has_conversion_tracking() -> int:
+    """Derive conversion-tracking flag from env (plan wire 1).
+
+    Returns 1 only when GOOGLE_ADS_CONVERSION_ACTION_ID holds a real action id.
+    Obvious placeholders (the env stub '1234567890') are rejected so CPA/CTR
+    anomaly rules don't fire before tracking is actually wired. save_campaign +
+    monitor.reconcile_campaigns both read this, so the flag is never reset to 0
+    on every sync (the original INSERT OR REPLACE bug).
+    """
+    action_id = (os.getenv("GOOGLE_ADS_CONVERSION_ACTION_ID") or "").strip()
+    placeholders = {"", "1234567890", "your_conversion_action_id"}
+    return 0 if action_id.lower() in {p.lower() for p in placeholders} else 1
 
 
 def save_campaign(conn: sqlite3.Connection, campaign_data: Dict[str, Any]) -> str:
@@ -161,15 +182,17 @@ def save_campaign(conn: sqlite3.Connection, campaign_data: Dict[str, Any]) -> st
     cursor = conn.cursor()
     cursor.execute('''
         INSERT OR REPLACE INTO campaigns (
-            campaign_id, niche, location, monthly_budget, daily_budget, status
-        ) VALUES (?, ?, ?, ?, ?, ?)
+            campaign_id, niche, location, monthly_budget, daily_budget,
+            status, has_conversion_tracking
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
     ''', (
         campaign_id,
         campaign_data.get("niche", ""),
         campaign_data.get("location", ""),
         campaign_data.get("monthly_budget", 0.0),
         campaign_data.get("daily_budget", 0.0),
-        campaign_data.get("status", "active")
+        campaign_data.get("status", "active"),
+        has_conversion_tracking()
     ))
 
     conn.commit()
@@ -235,6 +258,38 @@ def save_keywords(conn: sqlite3.Connection, campaign_id: str, keywords: List[Dic
 
     conn.commit()
     print(f"[DB] Saved {len(keywords)} keywords for campaign {campaign_id}")
+
+
+
+def find_or_create_keyword(conn: sqlite3.Connection, campaign_id: str,
+                           keyword_text: str, match_type: str) -> int:
+    """Find keywords.id by (campaign_id, text, match_type); insert if new (plan wire 2).
+
+    Deploy creates a single ad group per campaign, so text-matching within the
+    campaign is sufficient (KISS; criterion_id not tracked yet). Used by monitor
+    to map GAQL keyword_view rows → a stable entity_id for daily_metrics.
+
+    Returns the keyword row id, or -1 on failure (caller skips the upsert).
+    """
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT id FROM keywords WHERE campaign_id=? AND keyword=? AND match_type=? LIMIT 1",
+            (campaign_id, keyword_text, match_type),
+        )
+        row = cur.fetchone()
+        if row:
+            return row[0]
+        cur.execute(
+            "INSERT INTO keywords (campaign_id, keyword, match_type) VALUES (?, ?, ?)",
+            (campaign_id, keyword_text, match_type),
+        )
+        conn.commit()
+        print(f"[DB] Inserted keyword row (API/LLM-added): '{keyword_text}' [{match_type}]")
+        return cur.lastrowid
+    except Exception as e:
+        print(f"[DB] find_or_create_keyword error: {e}")
+        return -1
 
 
 def get_total_existing_daily_budget(conn: sqlite3.Connection) -> float:
@@ -522,6 +577,19 @@ def save_anomaly(conn: sqlite3.Connection, anomaly_type: str, entity_id: str, en
     """
     try:
         cursor = conn.cursor()
+        # Idempotent per (entity_id, anomaly_type, day): if a row already exists
+        # for today, return it instead of inserting a duplicate. Prevents row
+        # accumulation when a Telegram outage keeps re-detecting the same anomaly
+        # every sync (code-review M1). detected_at is UTC (SQLite datetime('now')).
+        cursor.execute(
+            "SELECT id FROM anomaly_log WHERE entity_id=? AND anomaly_type=? "
+            "AND date(detected_at)=date('now') ORDER BY id DESC LIMIT 1",
+            (entity_id, anomaly_type),
+        )
+        existing = cursor.fetchone()
+        if existing:
+            return existing["id"] if isinstance(existing, sqlite3.Row) else existing[0]
+
         cursor.execute('''
             INSERT INTO anomaly_log (
                 anomaly_type, entity_id, entity_name, metric_name,

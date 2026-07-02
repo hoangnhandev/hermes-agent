@@ -34,6 +34,12 @@ class D1Sync:
         # Connect to database
         self.conn = sqlite3.connect(db_path)
         self.conn.row_factory = sqlite3.Row
+        # Wire 5: ensure anomaly_log.synced_to_d1 exists (D1 sync flag, independent
+        # of the Telegram alert_sent flag). Idempotent for pre-existing DBs.
+        cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(anomaly_log)")}
+        if "synced_to_d1" not in cols:
+            self.conn.execute("ALTER TABLE anomaly_log ADD COLUMN synced_to_d1 INTEGER DEFAULT 0")
+            self.conn.commit()
 
     def get_unsynced_metrics(self) -> List[Dict[str, Any]]:
         """Get metrics that haven't been synced to D1."""
@@ -47,11 +53,15 @@ class D1Sync:
         return [dict(row) for row in cursor.fetchall()]
 
     def get_unsynced_anomalies(self) -> List[Dict[str, Any]]:
-        """Get anomalies that haven't been synced to D1."""
+        """Get anomalies not yet synced to D1 (wire 5).
+
+        Keyed on synced_to_d1, INDEPENDENT of the Telegram alert_sent flag — an
+        anomaly can be Telegram-alerted but still pending D1 sync, or vice versa.
+        """
         cursor = self.conn.cursor()
         cursor.execute('''
             SELECT * FROM anomaly_log
-            WHERE alert_sent = 0
+            WHERE COALESCE(synced_to_d1, 0) = 0
             ORDER BY detected_at
         ''')
 
@@ -78,19 +88,30 @@ class D1Sync:
         return [dict(row) for row in cursor.fetchall()]
 
     def build_sync_payload(self, metrics: List[Dict[str, Any]],
-                          campaigns: List[Dict[str, Any]]) -> Dict[str, Any]:
+                      campaigns: List[Dict[str, Any]],
+                      anomalies: List[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Build payload for D1 sync API.
 
-        Q2 fix: anomalies are NOT sent — D1 has no anomalies table and the
-        Workers /api/sync endpoint destructures {metrics,leads,campaigns,
-        ad_groups,ads,keywords} (ignores `anomalies`). Anomalies are a LOCAL
-        concern (anomaly_log + Telegram alert via monitor.py). Add the full
-        stack (D1 table + sync.js + dashboard) before re-including them.
+        Wire 5: anomalies ARE now sent. D1 has an `anomalies` table, sync.js
+        accepts the key, and the dashboard renders them. Each anomaly_log row is
+        mapped to the D1 anomalies column set.
         """
+        anomalies = anomalies or []
+        anomaly_payload = [{
+            "detected_at": a.get("detected_at"),
+            "anomaly_type": a.get("anomaly_type"),
+            "entity_id": a.get("entity_id"),
+            "entity_name": a.get("entity_name"),
+            "metric_name": a.get("metric_name"),
+            "current_value": a.get("current_value"),
+            "baseline_value": a.get("baseline_value"),
+            "change_pct": a.get("change_pct"),
+        } for a in anomalies]
         return {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "metrics": metrics,
             "campaigns": campaigns,
+            "anomalies": anomaly_payload,
             "sync_type": "incremental"
         }
 
@@ -159,15 +180,16 @@ class D1Sync:
             ''', metric_ids)
             print(f"[D1 Sync] Marked {len(metric_ids)} metrics as synced")
 
-        # Mark anomalies as alerted (synced)
+        # Mark anomalies as D1-synced (wire 5: synced_to_d1, NOT alert_sent — that
+        # flag belongs to the Telegram path in monitor.py and must stay independent).
         if anomaly_ids:
             placeholders = ','.join(['?' for _ in anomaly_ids])
             cursor.execute(f'''
                 UPDATE anomaly_log
-                SET alert_sent = 1
+                SET synced_to_d1 = 1
                 WHERE id IN ({placeholders})
             ''', anomaly_ids)
-            print(f"[D1 Sync] Marked {len(anomaly_ids)} anomalies as alerted")
+            print(f"[D1 Sync] Marked {len(anomaly_ids)} anomalies as synced to D1")
 
         self.conn.commit()
 
@@ -227,8 +249,8 @@ class D1Sync:
 
             print(f"[D1 Sync] Found {len(metrics)} metrics, {len(anomalies)} anomalies, {len(campaigns)} campaigns to sync")
 
-            # Build payload (Q2: anomalies are local-only, not sent to D1)
-            payload = self.build_sync_payload(metrics, campaigns)
+            # Build payload (wire 5: anomalies now included for the dashboard)
+            payload = self.build_sync_payload(metrics, campaigns, anomalies)
 
             # Sync to D1
             success = self.sync_to_d1(payload)

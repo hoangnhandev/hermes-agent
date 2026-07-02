@@ -277,7 +277,7 @@ The monitoring system follows a robust data flow:
 1. **Google Ads API** → Query campaigns, metrics, and leads via GAQL
 2. **Local SQLite** → Source of truth for all metrics and anomalies (`campaigns-local.db`)
 3. **Cloudflare D1** → Replica for dashboard and reporting (synced with retry logic)
-4. **Telegram Alerts** → daily reports only (anomaly pings: **local log only, NOT yet wired to Telegram**)
+4. **Telegram Alerts** → daily reports + anomaly pings (report channel; deduped per entity+type+day)
 
 ### Sync Protocol
 
@@ -285,7 +285,7 @@ Automated synchronization ensures data consistency:
 
 - **Frequency**: Can be run via cron (recommended: every 15-30 minutes during business hours)
 - **Retry Logic**: MAX_RETRIES=3 with exponential backoff (5s, 10s, 20s)
-- **Error Handling**: Tracks consecutive failures (alerts are logged locally; Telegram pings NOT yet wired)
+- **Error Handling**: Tracks consecutive failures; anomalies ping Telegram (best-effort — never blocks sync) and sync to D1 for the dashboard
 - **Data Integrity**: Reconciles orphan campaigns (marks as archived if deleted externally)
 
 GAQL query for metrics:
@@ -300,10 +300,11 @@ ORDER BY segments.date DESC, campaign.id
 
 ### Anomaly Detection
 
-> ⚠️ Detected anomalies are written to the local `anomaly_log` table **only**.
-> Telegram pings for anomalies are NOT yet wired (TODO in `monitor.py`).
-> Daily performance reports ARE sent to Telegram. Do not rely on anomaly
-> alerts reaching your phone yet.
+> Detected anomalies are written to the local `anomaly_log` table, pinged to the
+> Telegram REPORT channel (deduped per entity+type+day via the `alert_sent` flag),
+> and synced to the D1 `anomalies` table for the dashboard's Anomaly Alerts panel.
+> Daily performance reports are also sent to Telegram. Telegram is best-effort:
+> a missing bot token or outage logs locally and never blocks the sync cycle.
 
 Multi-campaign anomaly detection with intelligent baselines:
 
@@ -446,7 +447,10 @@ python3 scripts/creator.py --plan data/strategy-vf3-{date}.json
 - Interactive approval (`input()`) — approve variations by number (e.g. "1,3,5")
 - Deploys via `deploy.deploy_full_campaign` (REAL) — or `--mock` dry-run
 - **Cron/non-tty runs abort cleanly without deploying** (async `--approve` gate built, Phase 03)
-- **Anomaly alerts = LOCAL log only** (anomaly_log table). Anomalies are NOT synced to D1/Telegram yet (Workers /api/sync has no anomalies table); monitor logs them locally. Wire Telegram anomaly pings + D1 anomalies table in a future phase.
+- **Anomaly alerts** → local `anomaly_log` + Telegram report-channel ping (deduped per entity+type+day) + D1 `anomalies` table → dashboard "Anomaly Alerts" panel. All wired (loop-closure plan wires 4+5).
+- **Negative keywords** → applied at deploy as campaign-level `CampaignCriterion` (best-effort / non-fatal) from `keyword_seeds.negative` (wire 6a).
+- **Date boundary** → anomaly "today" and daily-report "yesterday" use ACCOUNT-LOCAL time (env `ACCOUNT_TZ`, default `Asia/Ho_Chi_Minh`) to match `segments.date`, which is account-local (VN=UTC+7). GAQL query windows still use UTC (wire 6c).
+- **Conversion tracking flag** → derived from `GOOGLE_ADS_CONVERSION_ACTION_ID` env (obvious placeholders rejected); CPA/CTR anomaly rules only fire when tracking is wired AND conversions>0.
 
 3. **Monitor** (automatic via cron, or manual):
 ```bash

@@ -332,3 +332,35 @@ function renderBudget(data) {
   if (data.spend_trend) renderSpendTrend(data.spend_trend);
   if (pacingArr) renderPerCampaignPacingTable(pacingArr);
 }
+
+/* ---------------- Anomalies (wire 5) ---------------- */
+/** Render the anomaly feed into the Overview tab's Anomaly Alerts table.
+ *  Source: /api/anomalies (D1 `anomalies` table, synced from local anomaly_log). */
+function renderAnomalies(data) {
+  const tbody = document.getElementById('anomaliesTableBody');
+  if (!tbody) return; // overview tab not active / not loaded
+  const anomalies = (data && data.anomalies) || [];
+  if (!anomalies.length) {
+    tbody.innerHTML = emptyRow(7, 'No anomalies detected');
+    return;
+  }
+  tbody.innerHTML = anomalies.slice(0, 50).map((a) => {
+    const change = (a.change_pct != null)
+      ? (a.change_pct >= 0 ? '+' : '') + Number(a.change_pct).toFixed(1) + '%'
+      : '--';
+    const cur = (a.current_value != null) ? formatNumber(a.current_value) : '--';
+    const base = (a.baseline_value != null) ? formatNumber(a.baseline_value) : '--';
+    const detected = a.detected_at ? String(a.detected_at).replace('T', ' ').slice(0, 19) : '--';
+    return (
+      '<tr>' +
+      '<td>' + esc(detected) + '</td>' +
+      '<td><span class="badge badge-warning">' + esc(a.anomaly_type || '') + '</span></td>' +
+      '<td>' + esc(a.entity_name || a.entity_id || '--') + '</td>' +
+      '<td>' + esc(a.metric_name || '--') + '</td>' +
+      '<td class="t-num">' + cur + '</td>' +
+      '<td class="t-num">' + base + '</td>' +
+      '<td class="t-num">' + change + '</td>' +
+      '</tr>'
+    );
+  }).join('');
+}

@@ -62,6 +62,15 @@ def run_budget_guardrails(db: sqlite3.Connection, daily_budget: float) -> bool:
     fixed ACCOUNT_MONTHLY_CAP (env MONTHLY_BUDGET) and we compare existing +
     proposed against it (proposed excluded from the cap derivation).
     """
+    # Wire 6b: warn (do NOT block) if MONTHLY_BUDGET looks misconfigured. A cap
+    # under 1M VND/mo almost always means a stale USD placeholder (e.g. 500) on
+    # a VND-native account → caps every deploy at near-zero. Non-fatal so a
+    # genuinely tiny test budget still works.
+    if ACCOUNT_MONTHLY_CAP < 1_000_000:
+        print(f"⚠️ [BUDGET] WARNING: MONTHLY_BUDGET={ACCOUNT_MONTHLY_CAP:,.0f} VND/mo "
+              f"is below 1,000,000 — likely a USD placeholder on a VND-native "
+              f"account. Set the real VND monthly budget in google-ads.env.")
+
     print(f"[BUDGET] Checking guardrails: daily {daily_budget:,.0f} VND "
           f"(account cap {ACCOUNT_MONTHLY_CAP:,.0f} VND/mo)")
     existing_monthly = get_total_monthly_budget(db)        # EXISTING campaigns only
@@ -181,6 +190,7 @@ def _research_to_deploy_plan(research_plan: Dict[str, Any]) -> Dict[str, Any]:
         "location": {"vn": "Vietnam"}.get(research_plan.get("market", "vn"), "Vietnam"),
         "budget_plan": {"daily_budget": daily, "estimated_cpc_range": [cpc, round(cpc * 1.4)]},
         "keywords": keywords,
+        "negatives": seeds.get("negative", []),
     }
 
 

@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
 from _env import load_google_ads_env  # self-contained under cron
 from _budget_calc import fmt_vnd
+from _dates import account_local_now, account_local_today
 
 
 class DailyReportGenerator:
@@ -241,7 +242,7 @@ class DailyReportGenerator:
             report += suggestions + "\n\n"
 
         # Footer
-        report += f"📅 Report generated at {datetime.now().strftime('%H:%M UTC')}\n"
+        report += f"📅 Report generated at {account_local_now().strftime('%H:%M')} (account-local)\n"
         report += f"🤖 Powered by Hermes Agent"
 
         return report
@@ -277,7 +278,9 @@ class DailyReportGenerator:
     def generate_report(self, date: str = None, send_to_telegram: bool = True) -> str:
         """Generate and optionally send daily report."""
         if not date:
-            date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+            # Account-local yesterday (wire 6c) — segments.date is account-local
+            # (VN=UTC+7), so "yesterday's report" must use the same boundary.
+            date = (account_local_now() - timedelta(days=1)).strftime("%Y-%m-%d")
 
         print(f"[Report] Generating report for {date}")
 
@@ -338,7 +341,7 @@ def main():
         )
 
         # Save report to file
-        report_path = args.db_path.parent / f"daily-report-{args.date or datetime.now().strftime('%Y-%m-%d')}.md"
+        report_path = args.db_path.parent / f"daily-report-{args.date or account_local_today()}.md"
         with open(report_path, 'w') as f:
             f.write(report)
 

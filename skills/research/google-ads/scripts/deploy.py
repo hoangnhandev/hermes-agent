@@ -229,6 +229,53 @@ def create_keywords(client: GoogleAdsClient, customer_id: str, ad_group_resource
     return created_keywords
 
 
+def create_negative_keywords(client: GoogleAdsClient, customer_id: str,
+                             campaign_resource_name: str, negatives: List[str]) -> List[str]:
+    """Add campaign-level negative keywords (wire 6a).
+
+    Negatives BLOCK matching queries → cut wasted spend on low-intent traffic
+    (e.g. "vf3 cũ", "review vf3", "tin tức vf3"). Campaign-level is the simplest
+    scope (KISS). Best-effort + non-fatal: a failure logs and returns [] —
+    negatives are a spend optimization, not a deploy gate, so a bad negative
+    must never roll back an otherwise-good campaign.
+    """
+    if not negatives:
+        print("[NEGATIVES] No negative keywords to add")
+        return []
+
+    print(f"[NEGATIVES] Adding {len(negatives)} campaign-level negative keywords")
+
+    if isinstance(client, MockGoogleAdsClient):
+        print(f"[NEGATIVES] Mock: Would add negatives: {', '.join(negatives[:5])}")
+        return [f"customers/{customer_id}/campaignCriteria/mock-negative-{i}"
+                for i in range(len(negatives))]
+
+    operations = []
+    for text in negatives:
+        op = client.get_type("CampaignCriterionOperation")
+        cc = op.create
+        cc.campaign = campaign_resource_name
+        cc.negative = True
+        cc.keyword.text = text
+        cc.keyword.match_type = client.enums.KeywordMatchTypeEnum.PHRASE
+        operations.append(op)
+
+    try:
+        service = client.get_service("CampaignCriterionService")
+        response = service.mutate_campaign_criteria(
+            customer_id=customer_id, operations=operations
+        )
+        created = [r.resource_name for r in response.results]
+        print(f"[NEGATIVES] Created {len(created)} negative keywords: {', '.join(negatives[:5])}")
+        return created
+    except GoogleAdsException as ex:
+        print(f"[NEGATIVES] Google Ads exception (non-fatal): {ex}")
+        return []
+    except Exception as e:
+        print(f"[NEGATIVES] Error (non-fatal): {e}")
+        return []
+
+
 def create_ads(client: GoogleAdsClient, customer_id: str, ad_group_resource_name: str, ads: List[Dict[str, Any]], final_url: str = "https://example.com") -> List[str]:
     """Batch-create responsive search ads in an ad group.
 
@@ -420,6 +467,15 @@ def deploy_full_campaign(client: GoogleAdsClient, customer_id: str, plan: Dict[s
         return {"success": False,
                 "error": "Keyword creation failed for all batches (campaign paused — no orphan)"}
 
+    # Create negative keywords (wire 6a) — best-effort, non-fatal. Failures are
+    # caught inside create_negative_keywords (log + return []), so a bad negative
+    # never blocks the campaign from serving. Negatives block low-intent queries
+    # and reduce wasted spend.
+    negatives = plan.get("negatives", []) or []
+    negative_resource_names = create_negative_keywords(
+        client, customer_id, campaign_resource_name, negatives
+    )
+
     # Create ads (final_url from env; guarded against example.com above)
     ad_resource_names = retry_with_backoff(
         lambda: create_ads(client, customer_id, ad_group_resource_name, variations, final_url)
@@ -438,6 +494,7 @@ def deploy_full_campaign(client: GoogleAdsClient, customer_id: str, plan: Dict[s
         "ad_group_name": ad_group_name,
         "ad_group_resource_name": ad_group_resource_name,
         "keywords_created": len(keyword_resource_names),
+        "negatives_created": len(negative_resource_names),
         "ads_created": len(ad_resource_names)
     }
 

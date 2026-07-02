@@ -17,14 +17,14 @@ const TAB_TITLES = {
 };
 
 // Data cache; re-rendered into whichever tab is active.
-const DATA = { metrics: null, leads: null, 'form-leads': null, budget: null, keywords: null };
+const DATA = { metrics: null, leads: null, 'form-leads': null, budget: null, keywords: null, anomalies: null };
 let activeTab = 'overview';
 
 /** Ensure the tab's HTML is present (cached), then render its data. */
 function renderTab(tabId) {
   return loadTabContent(tabId).then(() => {
     switch (tabId) {
-      case 'overview': renderOverview(DATA.metrics); break;
+      case 'overview': renderOverview(DATA.metrics); renderAnomalies(DATA.anomalies); break;
       case 'leads': renderLeads(DATA.leads); break;
       case 'form-leads': renderFormLeads(DATA['form-leads']); break;
       case 'keywords': renderCopyKeywords(DATA.keywords); break;
@@ -56,18 +56,20 @@ function setupNav() {
 // instead of blanking the whole dashboard. Auth redirect still fires via
 // refreshAndRedirect() inside fetchWithAuth.
 async function loadAll() {
-  const [metrics, leads, formLeads, budget, keywords] = await Promise.all([
+  const [metrics, leads, formLeads, budget, keywords, anomalies] = await Promise.all([
     fetchWithAuth('/api/metrics').catch(() => null),
     fetchWithAuth('/api/leads').catch(() => null),
     fetchWithAuth('/api/form-leads').catch(() => null),
     fetchWithAuth('/api/budget').catch(() => null),
     fetchWithAuth('/api/keywords').catch(() => null),
+    fetchWithAuth('/api/anomalies').catch(() => null),
   ]);
   DATA.metrics = metrics;
   DATA.leads = leads;
   DATA['form-leads'] = formLeads;
   DATA.budget = budget;
   DATA.keywords = keywords;
+  DATA.anomalies = anomalies;
   await renderTab(activeTab);
   updateLastUpdated();
 }

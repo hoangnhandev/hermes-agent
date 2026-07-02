@@ -121,6 +121,23 @@ CREATE TABLE IF NOT EXISTS api_keys (
     is_active INTEGER NOT NULL DEFAULT 1
 );
 
+-- Anomalies (synced from Hermes anomaly_log; wire 5). One row per detection;
+-- deduped by (detected_at, entity_id, anomaly_type). detected_at carries the
+-- local detection timestamp; metric values are in the metric's native unit
+-- (CPA/CTR are ratios, cost-derived CPA is VND).
+CREATE TABLE IF NOT EXISTS anomalies (
+    detected_at TEXT NOT NULL,
+    anomaly_type TEXT NOT NULL,
+    entity_id TEXT,
+    entity_name TEXT,
+    metric_name TEXT NOT NULL,
+    current_value REAL,
+    baseline_value REAL,
+    change_pct REAL,
+    synced_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (detected_at, entity_id, anomaly_type)
+);
+
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_metrics_entity_date ON daily_metrics(entity_type, entity_id, date);
 CREATE INDEX IF NOT EXISTS idx_metrics_date ON daily_metrics(date);
@@ -130,3 +147,4 @@ CREATE INDEX IF NOT EXISTS idx_keywords_campaign ON keywords(campaign_id);
 CREATE INDEX IF NOT EXISTS idx_ad_groups_campaign ON ad_groups(campaign_id);
 CREATE INDEX IF NOT EXISTS idx_ads_campaign ON ads(campaign_id);
 CREATE INDEX IF NOT EXISTS idx_campaigns_status ON campaigns(status);
+CREATE INDEX IF NOT EXISTS idx_anomalies_detected ON anomalies(detected_at);

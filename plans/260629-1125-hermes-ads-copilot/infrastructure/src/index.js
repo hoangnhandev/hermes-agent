@@ -6,6 +6,7 @@ import { handleLeads } from './leads.js';
 import { handleFormLeads } from './form-leads.js';
 import { handleKeywords } from './keywords.js';
 import { handleBudget } from './budget.js';
+import { handleAnomalies } from './anomalies.js';
 
 export default {
   async fetch(request, env, ctx) {
@@ -99,6 +100,14 @@ export default {
         case '/api/budget':
           if (request.method === 'GET') {
             return handleBudget(request, env);
+          }
+          break;
+
+        // Anomaly feed for the dashboard panel (wire 5). Behind verifyAuth like
+        // the other dashboard reads — anomalies expose no PII but aren't public.
+        case '/api/anomalies':
+          if (request.method === 'GET') {
+            return handleAnomalies(request, env);
           }
           break;
 
