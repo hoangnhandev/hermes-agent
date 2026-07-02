@@ -188,7 +188,6 @@ class GoogleAdsMonitor:
               metrics.conversions, metrics.conversions_value
             FROM campaign
             WHERE segments.date >= '{date_range}'
-              AND campaign.status != 'REMOVED'
             ORDER BY segments.date DESC, campaign.id
             """
 

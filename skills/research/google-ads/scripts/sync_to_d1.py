@@ -79,12 +79,12 @@ class D1Sync:
         cursor = self.conn.cursor()
         if since:
             cursor.execute(
-                "SELECT * FROM campaigns WHERE status='active' AND "
+                "SELECT * FROM campaigns WHERE status != 'archived' AND "
                 "(updated_at > ? OR updated_at IS NULL) ORDER BY updated_at DESC",
                 (since,))
         else:
             cursor.execute(
-                "SELECT * FROM campaigns WHERE status='active' ORDER BY updated_at DESC")
+                "SELECT * FROM campaigns WHERE status != 'archived' ORDER BY updated_at DESC")
         return [dict(row) for row in cursor.fetchall()]
 
     def build_sync_payload(self, metrics: List[Dict[str, Any]],
