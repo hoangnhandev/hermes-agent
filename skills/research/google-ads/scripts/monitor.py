@@ -189,7 +189,7 @@ class GoogleAdsMonitor:
               metrics.impressions, metrics.clicks, metrics.cost_micros,
               metrics.conversions, metrics.conversions_value
             FROM campaign
-            WHERE segments.date BETWEEN '{date_range}' AND '{today_str}'
+            WHERE segments.date >= '{date_range}' AND segments.date <= '{today_str}'
             ORDER BY segments.date DESC, campaign.id
             """
 
